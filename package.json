@@ -1,6 +1,6 @@
 {
   "name": "the-gift-edit-demo",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "Recipient-first gifts with optional model-driven Shop MCP tool use, transparent exclusions and buyer-controlled merchant checkout.",
   "type": "module",
