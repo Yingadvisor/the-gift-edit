@@ -1,0 +1,17 @@
+{
+  "name": "the-gift-edit-demo",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Recipient-first live Shop MCP gift discovery with transparent rules and buyer-controlled merchant checkout.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm test && npm run build"
+  }
+}

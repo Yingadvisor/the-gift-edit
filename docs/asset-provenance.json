@@ -1,0 +1,49 @@
+{
+  "source_library_file_id": "libfile_e4e9dc9ae230819192a475fa810827f7",
+  "source_filename": "Arcade-Products-and-Listing-Copy.zip",
+  "source_sha256": "4b307f8ead5fbdc0ebb2493a736bfd9455fde9f626e2be9dee29b52976091db8",
+  "source_pack_prepared_at": "2026-10-14",
+  "kind": "Eight Arcade digital product renders from four original artworks; not physical sample photography.",
+  "assets": [
+    {
+      "file": "public/assets/celestial-voyager-pillow-arcade-preview.png",
+      "sha256": "8c73dfbd3bd127de5167cf8ef1ddb83110fde94cf5f81fb92723cc0cebd452af",
+      "source_member": "product-images/celestial-voyager-pillow-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/celestial-voyager-pocket-square-arcade-preview.png",
+      "sha256": "4f1480d8aaa9a29c7d0050e3bd95525a9f51f7fafa37f947573585d5db28f4fa",
+      "source_member": "product-images/celestial-voyager-pocket-square-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/golden-passage-pillow-arcade-preview.png",
+      "sha256": "c2b6a39d471f96e69320bb215e5ea2401f46ed77ca1d9c09082c9916b64f6cad",
+      "source_member": "product-images/golden-passage-pillow-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/golden-passage-tote-arcade-preview.png",
+      "sha256": "8daaa0f37f523e799e442be5e9b576baba7679d0ed318029785da3c6634676c4",
+      "source_member": "product-images/golden-passage-tote-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/moonlit-botanica-pillow-arcade-preview.png",
+      "sha256": "3920b94dd065e69d62db11ec26fe7019f8b3c0657bb1cd001f04fc95da2f9738",
+      "source_member": "product-images/moonlit-botanica-pillow-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/moonlit-botanica-tea-towels-arcade-preview.png",
+      "sha256": "547e61216ec61e3ac502e3a50a955500819c74f5ce8f53dee2105fe9e9f6b1d9",
+      "source_member": "product-images/moonlit-botanica-tea-towels-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/ocean-reverie-cocktail-napkins-arcade-preview.png",
+      "sha256": "a83ac96fb60ade10c0fed7c20e97d82ed485e271fbf94b26cfdefcd12ea0bac2",
+      "source_member": "product-images/ocean-reverie-cocktail-napkins-arcade-preview.png"
+    },
+    {
+      "file": "public/assets/ocean-reverie-pillow-arcade-preview.png",
+      "sha256": "d6a4d0d2e5a71166129d68abb1ec6ca26d414294dffd85d65fd691586461866d",
+      "source_member": "product-images/ocean-reverie-pillow-arcade-preview.png"
+    }
+  ]
+}
