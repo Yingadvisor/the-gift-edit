@@ -46,7 +46,7 @@ test('bounded budgets use cents and reject invalid precision', () => {
   }
   assert.equal(summarizeGiftSet([item()],10000).valid,true);
   assert.equal(summarizeGiftSet([item('p',undefined,29)],0.29).valid,true);
-  assert.equal(canAddToGiftSet([item()],item('b'),23.99).allowed,false);
+  assert.equal(canAddToGiftSet([item()],item('b'),23.99).allowed,true);
 });
 test('adding an unreviewed candidate is allowed but checkout requires review and hash', () => {
   const candidate={...item(),reviewed:false,detailsHash:undefined};
@@ -99,3 +99,5 @@ test('empty requests cannot bypass known named or malformed option data', () => 
   const explicit=optionless(); explicit.product.selected=[]; explicit.variant.options=[]; explicit.product.options=[{name:'Color',values:[{label:'Blue'}]}];
   assert.equal(summarizeGiftSet([explicit],100).valid,false);
 });
+
+test('over-budget candidates may be added locally but checkout remains invalid until adjusted',()=>{const entries=[item('a',undefined,5000)],candidate=item('b',undefined,5399);assert.equal(canAddToGiftSet(entries,candidate,100).allowed,true);const summary=summarizeGiftSet([...entries,candidate],100);assert.equal(summary.subtotal,10399);assert.equal(summary.remaining,-399);assert.equal(summary.overBudget,true);assert.equal(summary.valid,false);assert.equal(summarizeGiftSet([...entries,candidate],103.99).valid,true);});

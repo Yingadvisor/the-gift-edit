@@ -193,12 +193,12 @@ test('Gift set UI review: add/remove exact variants uses cents and never creates
   assert.equal(h.run('state.setItems.length'),1);assert.equal(h.run('setSummary().subtotal'),4099);assert.equal(h.calls.length,0);
 });
 
-test('Gift set UI review: total above $100 blocks add and lowering budget retains but disables set',async()=>{
+test('Gift set UI review: total above $100 allows candidates while checkout stays blocked',async()=>{
   const h=await harness(()=>{throw new Error('Over-budget set cannot dispatch');});budget(h,100);
   await addFixture(h,setProduct('A',6000));await addFixture(h,setProduct('B',5000));
-  assert.equal(h.run('state.setItems.length'),1);assert.equal(h.run('setSummary().subtotal'),6000);
+  assert.equal(h.run('state.setItems.length'),2);assert.equal(h.run('setSummary().subtotal'),11000);
   h.get('budget').value='50';h.get('budget').listeners.input();
-  assert.equal(h.run('state.setItems.length'),1);assert.equal(h.run('setSummary().overBudget'),true);assert.equal(h.run('setSummary().valid'),false);
+  assert.equal(h.run('state.setItems.length'),2);assert.equal(h.run('setSummary().overBudget'),true);assert.equal(h.run('setSummary().valid'),false);
   await h.run("createSetCheckout('fixture.myshopify.com')");assert.equal(h.calls.length,0);
 });
 
@@ -436,7 +436,7 @@ test('Add-ons UI review: cards stay separate, become addable only after refresh,
   assert.equal(h.run('state.active.valid'),true);assert.equal(h.get('add-to-set').disabled,false);await h.run('addActiveToSet()');
   assert.equal(h.run('state.setItems.length'),2);assert.equal(h.run('setSummary().subtotal'),2800);assert.ok(h.calls.some(c=>c.action==='product'&&c.productId===card.id));assert.ok(h.calls.every(c=>c.action==='search'||c.action==='product'));
   const expensive={...card,id:'gid://shopify/p/expensive-card',variants:[{...card.variants[0],id:'gid://shopify/ProductVariant/expensive-card',price:{amount:8000,currency:'USD'}}]};
-  await addFixture(h,expensive);assert.equal(h.run('state.setItems.length'),2);
+  await addFixture(h,expensive);assert.equal(h.run('state.setItems.length'),3);assert.equal(h.run('setSummary().overBudget'),true);
 });
 
 test('Theme UI review: required Star Wars search cannot render unrelated main gifts or add-ons',async()=>{
@@ -776,4 +776,12 @@ test('Category chips: one click switches already loaded choices without network 
 
 test('Category chips: additional catalog choices remain rules-only under an AI shortlist and counts never invent unloaded categories',async()=>{
  const shirt=shirtFixture('Chosen'),mug=mugFixture('Extra');const h=await harness(payload=>payload.consent?response(emptyAgent({products:[shirt],recommendations:[{productId:shirt.id,variantId:shirt.variants[0].id,reason:'An observed shirt.'}]})):response({products:[mug],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars.',budget:100};h.get('use-agent').checked=true;await h.run('search()');assert.ok(!descendants(h.get('results-content')).some(n=>n['data-category']==='drinkware'));await h.run('loadMoreOptions()');const calls=h.calls.length;descendants(h.get('results-content')).find(n=>n['data-category']==='drinkware').listeners.click();assert.equal(h.calls.length,calls);assert.equal(descendants(h.get('results-content')).filter(n=>n.tagName==='article').length,1);assert.match(uiText(h.get('results-content')),/not additional model-selected recommendations/);const card=descendants(h.get('results-content')).find(n=>n.tagName==='article');descendants(card).find(n=>n.textContent==='Gift brief').listeners.click();assert.match(h.get('brief-text').value,/Ranking is rules-based/);assert.equal(h.run('state.agentResult.recommendations.length'),1);
+});
+
+test('Candidate set: $53.99 watch can exceed $100 total, shows excess, and cannot create an over-budget checkout',async()=>{
+ const candidate=setProduct('Watch',5399);const h=await harness(payload=>{assert.equal(payload.action,'product');return response({product:candidate,messages:[]});});budget(h,100);await addFixture(h,setProduct('Prior',5000));h.context.candidate=candidate;await h.run('openProduct({product:candidate,variant:candidate.variants[0]},null)');assert.equal(h.get('add-to-set').disabled,false);assert.match(uiText(h.get('product-detail')),/3\.99 USD over budget/);await h.run('addActiveToSet()');assert.equal(h.run('state.setItems.length'),2);assert.equal(h.run('setSummary().subtotal'),10399);assert.match(uiText(h.get('gift-set-content')),/3\.99 USD over budget/);await h.run("createSetCheckout('fixture.myshopify.com')");assert.equal(h.calls.length,1);descendants(h.get('gift-set-content')).find(n=>n.textContent==='Remove').listeners.click();assert.equal(h.run('setSummary().valid'),true);assert.equal(h.run('setSummary().subtotal'),5399);
+});
+
+test('Candidate set: open dialog updates budget guidance immediately without another network call',async()=>{
+ const candidate=setProduct('Watch',5399);const h=await harness(()=>response({product:candidate,messages:[]}));budget(h,100);await addFixture(h,setProduct('Prior',5000));h.context.candidate=candidate;await h.run('openProduct({product:candidate,variant:candidate.variants[0]},null)');assert.match(uiText(h.get('product-detail')),/3\.99 USD over budget/);h.get('budget').value='150';h.get('budget').listeners.input();assert.equal(h.get('add-to-set').disabled,false);assert.doesNotMatch(uiText(h.get('product-detail')),/3\.99 USD over budget/);h.get('budget').value='50';h.get('budget').listeners.input();assert.equal(h.get('add-to-set').disabled,true);assert.equal(h.get('create-checkout').disabled,true);assert.equal(h.calls.length,1);
 });

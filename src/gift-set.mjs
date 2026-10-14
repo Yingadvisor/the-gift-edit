@@ -98,6 +98,7 @@ export function canAddToGiftSet(items, candidate, budgetUsd) {
     subtotal += item.variant.price.amount;
     if (!Number.isSafeInteger(subtotal)) return reject('A trustworthy USD subtotal cannot be calculated.');
   }
-  if (subtotal > budget) return reject('Adding this gift would exceed the item-price budget.');
+  // A candidate set may exceed the target while the shopper compares items.
+  // summarizeGiftSet still blocks checkout until the total fits the explicit budget.
   return {allowed: true, reason: null};
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Recipient-first gift discovery from live Shop merchant listings, with transparent rules-based matching and buyer-controlled checkout.">
-  <meta name="application-version" content="0.5.5">
+  <meta name="application-version" content="0.5.6">
   <meta name="theme-color" content="#122b43"><title>The Gift Edit · Thoughtful by design</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.mjs"></script>
@@ -46,7 +46,7 @@
         <form id="gift-form" novalidate>
           <div class="field"><label for="recipient" id="recipient-label">Who is the gift for?</label><input id="recipient" name="recipient" placeholder="e.g. Alex, my best friend" maxlength="80" required autocomplete="off"></div>
           <div class="field"><label for="likes" id="likes-label">What do they love?</label><textarea id="likes" name="likes" rows="4" maxlength="1200" placeholder="They love ocean walks, collecting shells, and hosting friends for dinner." required aria-describedby="likes-note"></textarea><p class="field-note" id="likes-note">Tell us about the recipient, not your own taste. We match only the interests you actually mention.</p></div>
-          <div class="field"><div class="label-row"><label for="budget">Budget ceiling</label><span>USD · set item subtotal</span></div><input id="budget" name="budget" type="number" min="1" max="10000" step="0.01" placeholder="e.g. 120" required inputmode="decimal" aria-describedby="budget-note"><p class="field-note" id="budget-note">US / USD demo context, not your location. Shipping and tax are extra and may take the final total over this budget.</p></div>
+          <div class="field"><div class="label-row"><label for="budget">Budget target</label><span>USD · set item subtotal</span></div><input id="budget" name="budget" type="number" min="1" max="10000" step="0.01" placeholder="e.g. 120" required inputmode="decimal" aria-describedby="budget-note"><p class="field-note" id="budget-note">US / USD demo context, not your location. Shipping and tax are extra and may take the final total over this budget.</p></div>
           <div class="field"><label for="dislikes">Things to avoid <span class="optional">Optional</span></label><textarea id="dislikes" name="dislikes" rows="2" maxlength="1200" placeholder="e.g. silk, pillows, floral patterns"></textarea></div>
           <details id="more-preferences" class="more-preferences"><summary id="preferences-summary">More preferences</summary>
           <div class="form-row"><div class="field"><label for="relationship">Your relationship</label><select id="relationship" name="relationship"><option value="Friend">Friend</option><option>Partner</option><option>Family</option><option>Colleague</option><option>Host</option><option>Myself</option><option>Other</option></select></div><div class="field"><label for="occasion">The occasion</label><select id="occasion" name="occasion"><option>Birthday</option><option>Thank you</option><option>Housewarming</option><option>Anniversary</option><option>Celebration</option><option>Just because</option></select></div></div>
