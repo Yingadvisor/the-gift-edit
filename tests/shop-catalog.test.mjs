@@ -94,3 +94,9 @@ test('optional add-ons are bounded to five and respect shared seeded category us
  assert.equal(rankShopProducts(items,profile).addons.length,5);
  assert.equal(rankShopProducts(items,profile,{categoryUsage:{'stationery-books':4}}).addons.length,1);
 });
+
+test('independent-interest ranking reserves evidence-backed coverage while retaining category cap and hard constraints',()=>{
+ const make=(id,title,amount=2000)=>{const p=product({id,title,description:title});p.variants[0].id=`variant-${id}`;p.variants[0].price.amount=amount;return p;};const entries=[...Array.from({length:10},(_,i)=>make(`h${i}`,'Hiking ceramic mug')),make('m','Movie cinema ceramic mug')];
+ const context={...profile,likes:'hiking movie',query:'hiking gifts',budget:100};const result=rankShopProducts(entries,context);assert.equal(result.recommendations.length,5);assert.ok(result.recommendations.some(r=>r.product.id==='m'));assert.ok(result.recommendations.some(r=>r.product.id.startsWith('h')));
+ const excluded=rankShopProducts([...entries,make('bad',"Women's movie necklace"),make('over','Movie book',10001)],{...context,audience:'men',dislikes:'cinema'});assert.ok(excluded.recommendations.every(r=>r.product.id!=='m'&&r.product.id!=='bad'&&r.product.id!=='over'));assert.ok(!excluded.recommendations.some(r=>r.product.title.includes('Movie')));
+});

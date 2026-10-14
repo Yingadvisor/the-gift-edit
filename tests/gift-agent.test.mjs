@@ -347,3 +347,67 @@ test('rules recovery preserves already collected merchant warnings',async()=>{
  const h=harness([search(),refresh(),search()]);const result=await runGiftAgent(profile,{...h.options,maxSteps:3});
  assert.equal(result.modelConnected,false);assert.deepEqual(result.messages,[{type:'warning',content:'Tax and shipping extra'}]);
 });
+test('independent interests: hiking/movie and coffee/gardening each receive bounded real retrieval and eligible coverage',async()=>{
+ const {interestQueries}=await import('../src/interest-coverage.mjs');
+ for(const [likes,firstTitle,secondTitle,badTitle] of [['hiking movie','Hiking water bottle','Movie cinema poster','Movie scented candle'],['coffee gardening','Coffee mug','Gardening tool set','Gardening scented candle']]){
+  const queries=interestQueries({...profile,likes});assert.equal(queries.length,2);
+  const first=Array.from({length:12},(_,n)=>{const p=product();p.id=`gid://shopify/Product/interest${n}`;p.title=firstTitle;p.description={plain:firstTitle};p.variants[0].id=`gid://shopify/ProductVariant/interest${n}`;return p;});
+  const second=product();second.id='gid://shopify/Product/second-interest';second.title=secondTitle;second.description={plain:secondTitle};second.variants[0].id='gid://shopify/ProductVariant/second-interest';
+  const bad=product();bad.id='gid://shopify/Product/excluded-interest';bad.title=badTitle;bad.description={plain:badTitle};bad.variants[0].id='gid://shopify/ProductVariant/excluded-interest';
+  const selected=[first[0],second,bad];const batch={role:'assistant',tool_calls:selected.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+  const replies=[search(),batch,{role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:selected.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})}];const modelCalls=[],shopCalls=[];
+  const out=await runGiftAgent({...profile,likes,query:queries[0],excludedFactors:['fragrance']},{callModel:async request=>{modelCalls.push(request);return replies.shift();},callShop:async(name,args)=>{shopCalls.push({name,args});if(name==='get_product')return {product:selected.find(p=>p.id===args.catalog.id)};return {products:args.catalog.query===queries[1]?[second,bad]:first};}});
+  assert.equal(shopCalls[0].args.catalog.query,queries[0]);assert.equal(shopCalls[1].args.catalog.query,queries[1]);assert.ok(shopCalls.filter(c=>c.name==='search_catalog').length<=3);assert.ok(shopCalls.length<=16);
+  const shown=JSON.parse(modelCalls[1].messages.at(-1).content).untrustedCatalogData.products;assert.ok(shown.some(p=>p.id===second.id));assert.equal(shown.length,12);
+  assert.deepEqual(new Set(out.recommendations.map(r=>r.productId)),new Set([first[0].id,second.id]));assert.equal(out.selectionDiagnostics.rejectionCounts.exclusion,1);
+ }
+});
+test('independent interests: model shortlist gaps are disclosed without code-added AI recommendations',async()=>{
+ const p=product();p.title='Hiking mug';p.description={plain:'Hiking mug'};const h=harness(undefined,p);
+ const out=await runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts'},h.options);
+ assert.equal(out.recommendations.length,1);assert.ok(out.messages.some(m=>/does not cover every independent/.test(m.content)));
+});
+test('independent interests: validated minority-interest gift survives the five-per-category cap',async()=>{
+ const products=Array.from({length:6},(_,n)=>{const p=product();p.id=`gid://shopify/Product/coverage-cap${n}`;p.title=n<5?'Hiking ceramic mug':'Movie cinema ceramic mug';p.description={plain:p.title};p.variants[0].id=`gid://shopify/ProductVariant/coverage-cap${n}`;return p;});
+ const batch={role:'assistant',tool_calls:products.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const replies=[search(),batch,{role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:products.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})}];
+ const result=await runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts'},{callModel:async()=>replies.shift(),callShop:async(name,args)=>name==='search_catalog'?{products}:{product:products.find(p=>p.id===args.catalog.id)}});
+ assert.equal(result.recommendations.length,5);assert.ok(result.recommendations.some(r=>r.productId===products[5].id));assert.equal(result.selectionDiagnostics.rejectionCounts.category_limit,1);
+});
+test('catalog alternatives: uncovered observed movie gifts remain rules-only and strictly screened',async()=>{
+ const hiking=product();hiking.title='Hiking mug';hiking.description={plain:hiking.title};
+ const candidates=Array.from({length:8},(_,n)=>{const p=product();p.id=`gid://shopify/Product/alt${n}`;p.variants[0].id=`gid://shopify/ProductVariant/alt${n}`;p.title='Movie cinema poster';p.description={plain:p.title};return p;});
+ candidates[0].variants[0].availability.available=false;candidates[1].variants[0].price.currency='EUR';candidates[2].variants[0].price.amount=10001;
+ candidates[3].title="Women's movie necklace";candidates[4].description={plain:'Movie poster with silk fabric'};candidates[5].title='Movie greeting card';
+ const h=harness();h.options.callShop=async(name,args)=>{h.shopCalls.push({name,args});return name==='get_product'?{product:hiking}:{products:args.catalog.query==='movie gifts'?candidates:[hiking]};};
+ const out=await runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts',audience:'men',dislikes:'silk',budget:100},h.options);
+ assert.deepEqual(out.recommendations.map(r=>r.productId),[id]);assert.deepEqual(out.products.map(p=>p.id),[id]);assert.deepEqual(out.catalogAlternatives.map(p=>p.id),[candidates[6].id,candidates[7].id]);
+ assert.equal(h.shopCalls.filter(c=>c.name==='get_product').length,1);assert.ok(out.messages.some(m=>/rules-screened, not AI-selected/.test(m.content)));
+ assert.ok(out.catalogAlternatives.every(p=>p.variants.length===1));
+});
+test('catalog alternatives: latest refresh beats stale observed stock and fabricated final IDs remain fatal',async()=>{
+ const hiking=product();hiking.title='Hiking mug';hiking.description={plain:hiking.title};
+ const movie=product();movie.id='gid://shopify/Product/latest-movie';movie.title='Movie poster';movie.description={plain:movie.title};movie.variants[0].id='gid://shopify/ProductVariant/latest-movie';
+ const stale=structuredClone(movie);movie.variants[0].availability.available=false;
+ const h=harness([search(),tool('get_product',{productId:movie.id,selected:[]},2),tool('get_product',{productId:id,selected:[]},3),finish()]);h.options.callShop=async(name,args)=>name==='search_catalog'?{products:[hiking,stale]}:{product:args.catalog.id===id?hiking:movie};
+ const out=await runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts'},h.options);assert.deepEqual(out.catalogAlternatives,[]);
+ await rejectsCode(()=>runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts'},harness([search(),refresh(),finish({productId:'gid://shopify/Product/invented'})]).options),'AGENT_INVALID_RESPONSE');
+});
+test('catalog alternatives reserve room by removing only redundant AI-selected gifts',async()=>{
+ const hiking=Array.from({length:5},(_,n)=>{const p=product();p.id=`gid://shopify/Product/reserve${n}`;p.title='Hiking mug';p.description={plain:p.title};p.variants[0].id=`gid://shopify/ProductVariant/reserve${n}`;return p;});
+ const movie=product();movie.id='gid://shopify/Product/reserve-movie';movie.title='Movie mug';movie.description={plain:movie.title};movie.variants[0].id='gid://shopify/ProductVariant/reserve-movie';
+ const batch={role:'assistant',tool_calls:hiking.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const replies=[search(),batch,{role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:hiking.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})}];
+ const out=await runGiftAgent({...profile,likes:'hiking movie',query:'hiking gifts'},{callModel:async()=>replies.shift(),callShop:async(name,args)=>name==='search_catalog'?{products:[...hiking,movie]}:{product:hiking.find(p=>p.id===args.catalog.id)}});
+ assert.equal(out.recommendations.length,4);assert.equal(out.catalogAlternatives.length,1);assert.equal(out.catalogAlternatives[0].id,movie.id);assert.equal(out.recommendations.some(r=>r.productId===movie.id),false);
+ assert.deepEqual(out.products.map(p=>p.id),out.recommendations.map(r=>r.productId));assert.equal(out.selectionDiagnostics.modelProposedCount,5);assert.equal(out.selectionDiagnostics.acceptedCount,4);assert.equal(out.selectionDiagnostics.rejectionCounts.category_limit,1);
+ assert.ok(out.messages.some(m=>m.type==='info'&&/rules-screened/.test(m.content)));
+});
+test('catalog alternatives never prune the sole coverage of an already represented interest',async()=>{
+ const chosen=Array.from({length:10},(_,n)=>{const p=product();p.id=`gid://shopify/Product/sole${n}`;p.title=n===9?'Movie pillow':n<5?'Hiking mug':'Hiking pillow';p.description={plain:p.title};p.variants[0].id=`gid://shopify/ProductVariant/sole${n}`;return p;});
+ const gardening=product();gardening.id='gid://shopify/Product/gardening-alt';gardening.title='Gardening pillow';gardening.description={plain:gardening.title};gardening.variants[0].id='gid://shopify/ProductVariant/gardening-alt';
+ const batch={role:'assistant',tool_calls:chosen.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const replies=[search(),batch,{role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:chosen.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})}];
+ const out=await runGiftAgent({...profile,likes:'hiking movie gardening',query:'hiking gifts'},{callModel:async()=>replies.shift(),callShop:async(name,args)=>name==='search_catalog'?{products:[...chosen,gardening]}:{product:chosen.find(p=>p.id===args.catalog.id)}});
+ assert.ok(out.recommendations.some(r=>r.productId===chosen[9].id));assert.equal(out.recommendations.length,9);assert.equal(out.catalogAlternatives.length,1);assert.equal(out.catalogAlternatives[0].id,gardening.id);assert.equal(out.products.length,out.recommendations.length);
+});

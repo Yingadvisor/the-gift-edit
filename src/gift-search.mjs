@@ -26,6 +26,7 @@ const INTERESTS = [
   'basketball', 'football', 'soccer', 'yoga', 'fitness', 'swimming', 'skiing',
   'reading', 'books', 'poetry', 'journaling', 'stationery', 'calligraphy',
   'drawing', 'painting', 'art', 'pottery', 'ceramics', 'crafts', 'knitting', 'crochet',
+  'movies', 'movie', 'films', 'film', 'cinema',
   'photography', 'music', 'guitar', 'piano', 'jazz', 'vinyl', 'gaming', 'puzzles',
   'coffee', 'tea', 'chocolate', 'cats', 'dogs', 'birds', 'dinosaurs',
   'fashion', 'silk', 'linen', 'accessories', 'jewelry', 'jewellery', 'necklace',
@@ -52,6 +53,17 @@ function safeInterestPhrase(value) {
   if (words.length > 1 && phrase.split(/\s+/).every(word => /^[A-Z][a-z]+$/.test(word))
     && !words.every(word => SAFE_QUOTE_WORDS.has(word))) return null;
   return phrase;
+}
+
+// Split only a complete sequence of recognized interests, using longest phrases
+// first. Unknown compounds (e.g. hiking boots, mechanical keyboards) stay whole.
+// Explicit commas/and already separate novel interests through the existing path.
+function adjacentInterests(value) {
+  const words=normal(value).split(' ');
+  const vocabulary=[...THEMES,...INTERESTS].map(term=>({term,words:normal(term).split(' ')})).sort((a,b)=>b.words.length-a.words.length);
+  const parts=[];let position=0;
+  while(position<words.length){const found=vocabulary.find(item=>item.words.every((word,index)=>words[position+index]===word));if(!found)return [value];parts.push(found.term);position+=found.words.length;}
+  return parts.length>1?parts:[value];
 }
 
 function collectSearchTerms(profile = {}) {
@@ -91,7 +103,7 @@ function collectSearchTerms(profile = {}) {
   for (const clause of clauses) {
     const preference = /\b(?:likes?|loves?|enjoys?|collects?|prefers?)\s+(.+)$/i.exec(clause);
     const list = preference ? preference[1] : clause;
-    for (const part of list.split(/,|\band\b|\bor\b|&/i)) addNovel(part);
+    for (const part of list.split(/,|\band\b|\bor\b|&/i)) for(const interest of adjacentInterests(part)) addNovel(interest);
   }
   for (const interest of INTERESTS) if (contains(positive,interest)) add(interest);
   const genericAudience = profile?.audience && profile.audience !== 'any' ? '' : (() => {

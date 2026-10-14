@@ -96,3 +96,9 @@ test('novel phrase path rejects identity, contact, biography and health details'
   assert.equal(buildGiftSearchQuery({likes:'I love mechanical keyboards. They enjoy fountain pens.'}),'fountain pens gifts');
   assert.equal(buildGiftSearchQuery({likes:'They love fountain pens but dislike mechanical keyboards.'}),'fountain pens gifts');
 });
+
+test('independent adjacent interests split without breaking named entities or useful compounds',()=>{
+ for(const [likes,queries]of [['hiking movie',['hiking gifts','movie gifts']],['coffee gardening',['coffee gifts','gardening gifts']],['rock climbing movies',['rock climbing gifts','movies gifts']],['photography travel',['photography gifts','travel gifts']],['They enjoy mechanical keyboards and movies.',['mechanical keyboards gifts','movies gifts']]])assert.deepEqual(buildGiftSearchPlan({likes}),{queries,hasTheme:false});
+ for(const [likes,query]of [['hiking boots','hiking boots gifts'],['home decor','home decor gifts'],['coffee brewing','coffee brewing gifts'],['mechanical keyboards','mechanical keyboards gifts'],['Star Wars','Star Wars'],['Harry Potter','Harry Potter']])assert.equal(buildGiftSearchQuery({likes}),query);
+ assert.deepEqual(buildGiftSearchPlan({likes:'They enjoy hiking but dislike movies.'}).queries,['hiking gifts']);assert.deepEqual(buildGiftSearchPlan({likes:'I enjoy movies. They like hiking.'}).queries,['hiking gifts']);assert.ok(buildGiftSearchPlan({likes:'hiking movie coffee gardening photography'}).queries.length<=3);
+});
