@@ -397,24 +397,9 @@ test('Self-gift UI review: example button returns to Friend without restoring st
   assert.deepEqual(h.calls.map(call=>call.query),['ocean walks gifts','collecting shells gifts','hosting gifts']);assert.ok(h.requests.every(request=>request.url==='/api/shop'));
 });
 
-test('Gift modes UI review: custom toggles right column locally without changing shared form',async()=>{
-  const h=await harness(()=>{throw new Error('Mode switching must not call providers');});
-  const before=structuredClone(h.get('gift-form').values);
-  h.run("setGiftMode('custom')");
-  assert.equal(h.get('ready-made-content').hidden,true);assert.equal(h.get('custom-workspace').hidden,false);assert.equal(h.get('custom-panel').hidden,true);assert.equal(h.get('custom-empty').hidden,false);
-  assert.equal(h.get('mode-custom')['aria-pressed'],'true');assert.equal(h.get('mode-ready')['aria-pressed'],'false');assert.equal(h.custom.refreshes,0);
-  assert.deepEqual(h.get('gift-form').values,before);assert.equal(h.calls.length,0);
-  assert.equal(h.custom.options.getProfile().recipient,undefined);
-});
 
-test('Gift modes UI review: submitting custom mode never invokes Shop or AI even when AI checkbox is checked',async()=>{
-  const h=await harness(()=>{throw new Error('Custom submission must stay local');});h.get('use-agent').checked=true;
-  h.run("setGiftMode('custom')");const count=h.custom.refreshes;
-  h.get('gift-form').listeners.submit({preventDefault(){}});await new Promise(resolve=>setImmediate(resolve));
-  assert.ok(h.custom.refreshes>count);assert.equal(h.calls.length,0);assert.equal(h.run('state.agentResult'),null);assert.equal(h.custom.options.getProfile().recipient,profile.recipient);
-});
 
-test('Gift modes UI review: returning to ready mode retains existing product results and set',async()=>{
+test('Ready-only UI review: a disabled custom-mode request retains ready-made results and set',async()=>{
   const h=await harness(()=>response({products:[product()],messages:[]}));await h.run('search()');await addFixture(h,setProduct('A',3000));
   const result=h.run('state.result'),products=h.run('state.products'),set=h.run('state.setItems');const callCount=h.calls.length;
   h.run("setGiftMode('custom');setGiftMode('ready')");
@@ -542,41 +527,8 @@ test('Expression UI review: optional clickable meaning appears below avoidances 
   const expression=form.match(/<input[^>]*id="expression"[^>]*>/)[0];assert.doesNotMatch(expression,/required/);assert.match(form,/>Find gifts /);
 });
 
-test('Expression UI review: real custom module survives empty-state entry and changes only on submission',async()=>{
-  const h=await harness(()=>{throw new Error('Custom ideas must not call a provider');},{realCustom:true});
-  h.run("setGiftMode('custom')");assert.equal(h.get('custom-empty').hidden,false);assert.equal(h.get('custom-panel').hidden,true);
-  h.get('gift-form').values={...profile,expression:'Protection and care'};h.get('gift-form').listeners.submit({preventDefault(){}});
-  assert.equal(h.get('custom-empty').hidden,true);assert.equal(h.get('custom-panel').hidden,false);
-  const panel=h.get('custom-panel');assert.ok(descendants(panel).some(n=>n['aria-label']==='Relevant original product concepts'));
-  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: Protection and care.')));
-  h.get('gift-form').values.expression='New beginnings';h.get('gift-form').listeners.input({target:{id:'expression'}});
-  assert.ok(!descendants(panel).some(n=>n.tagName==='button'&&String(n['aria-label']).startsWith('Ocean Reverie ·')));
-  const pattern=descendants(panel).find(n=>n['aria-label']==='Pattern: Ocean Reverie');assert.ok(pattern);assert.ok(descendants(pattern).some(n=>n.tagName==='img'&&n.alt==='Ocean Reverie original artwork'));pattern.listeners.click();
-  descendants(panel).find(n=>n.tagName==='button'&&n['aria-label']==='Ocean Reverie · Decorative Pillow').listeners.click();
-  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: Protection and care.')));
-  assert.ok(!descendants(panel).some(n=>String(n.textContent).includes('Expressing: New beginnings.')));
-  descendants(panel).find(n=>n.textContent==='View design brief').listeners.click();assert.match(h.get('brief-text').value,/Protection and care/);assert.doesNotMatch(h.get('brief-text').value,/New beginnings/);
-  h.get('gift-form').listeners.submit({preventDefault(){}});
-  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: New beginnings.')));assert.equal(h.calls.length,0);
-});
 
-test('Expression UI review: ready-to-custom switches reuse the submitted snapshot, not unsubmitted edits',async()=>{
-  const h=await harness(()=>response({products:[product()],messages:[]}),{realCustom:true});h.get('gift-form').values={...profile,expression:'Enduring companionship'};await h.run('search()');
-  h.get('gift-form').values.expression='Courage';h.get('gift-form').values.recipient='UNSUBMITTED NAME';h.get('gift-form').listeners.input({target:{id:'expression'}});
-  const results=h.run('state.result');h.run("setGiftMode('custom')");
-  assert.equal(h.custom.options.getProfile().expression,'Enduring companionship');assert.equal(h.custom.options.getProfile().recipient,profile.recipient);
-  assert.ok(descendants(h.get('custom-panel')).some(n=>String(n.textContent).includes('Expressing: Enduring companionship.')));
-  h.run("setGiftMode('ready')");assert.equal(h.calls.length,1);assert.equal(h.run('state.result'),results);assert.equal(h.run('state.preferencesDirty'),true);
-  assert.equal(h.get('gift-form').values.expression,'Courage');assert.equal(h.get('gift-form').values.recipient,'UNSUBMITTED NAME');
-});
 
-test('Expression UI review: custom-to-ready retrieval uses the submitted snapshot and retains dirty-checkout guard',async()=>{
-  const h=await harness(()=>response({products:[product()],messages:[]}));h.get('gift-form').values={...profile,expression:'Gratitude'};h.run("setGiftMode('custom');submitCustom()");
-  h.get('gift-form').values.likes='They love gardening.';h.get('gift-form').values.dislikes='ocean';h.get('gift-form').listeners.input({target:{id:'dislikes'}});
-  h.run("setGiftMode('ready')");await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(h.calls.length,1);assert.equal(h.calls[0].query,'ocean gifts');assert.equal(h.run('state.profile.likes'),profile.likes);assert.equal(h.run('state.preferencesDirty'),true);
-  await h.run('createCheckout()');assert.equal(h.calls.length,1);
-});
 
 test('Expression UI review: rules ignore legacy query and raw meaning, while explicit AI consent sends the meaning only in its declared field',async()=>{
   const secret='A private personal expression, not catalog words';
@@ -586,12 +538,6 @@ test('Expression UI review: rules ignore legacy query and raw meaning, while exp
   assert.equal(ai.calls[0].expression,secret);assert.equal(ai.calls[0].query,'ocean gifts');assert.doesNotMatch(JSON.stringify(ai.calls),/Private Name|LEGACY|recipient|relationship/);
 });
 
-test('Expression UI review: a custom submission prevents an older ready-made response from replacing its snapshot',async()=>{
-  const pending=deferred();const h=await harness(()=>pending.promise);const old=h.run('search()');
-  h.get('gift-form').values={...profile,expression:'New beginnings'};h.run("setGiftMode('custom');submitCustom()");
-  pending.resolve(response({products:[setProduct('Stale')],nextCursor:'stale',messages:[]}));await old;
-  assert.equal(h.run('state.submittedProfile.expression'),'New beginnings');assert.equal(h.run('state.products.length'),0);assert.equal(h.run('state.agentResult'),null);assert.equal(h.run('state.readySearched'),false);
-});
 
 test('Search plan UI review: mixed interests use focused parallel queries, merge unique listings, and page the exact first query',async()=>{
   const ocean=setProduct('Ocean'),garden=setProduct('Garden'),extra=setProduct('MoreOcean');garden.title='Gardening kit';garden.description='Botanical tools for gardening.';
@@ -608,7 +554,7 @@ test('Search plan UI review: exact named-theme retrieval is not narrowed by unre
   const themed=product();themed.title='Star Wars mug';
   const h=await harness(()=>response({products:[themed],nextCursor:'theme-page',messages:[]}));
   h.get('gift-form').values={...profile,likes:'They love Star Wars, coffee and gardening.',audience:'men',ageBand:'30-44'};await h.run('search()');await h.run('loadMoreOptions()');
-  assert.deepEqual(h.calls,[{action:'search',query:'Star Wars',budget:75},{action:'search',query:'Star Wars',budget:75,cursor:'theme-page'}]);
+  assert.deepEqual(h.calls,[{action:'search',query:'Star Wars',budget:75},{action:'search',query:'Star Wars mugs',budget:75},{action:'search',query:'Star Wars collectibles',budget:75},{action:'search',query:'Star Wars',budget:75,cursor:'theme-page'}]);
   assert.equal(h.run('state.profile.audience'),'men');assert.equal(h.run('state.profile.ageBand'),'30-44');assert.equal(h.run('state.result.recommendations.length'),1);
 });
 
@@ -616,15 +562,6 @@ const uiText=root=>descendants(root).map(n=>String(n.textContent??'')).join('\n'
 function clickMeaning(h,text){h.get('expression-chips').children.find(node=>node.textContent===text).listeners.click();}
 const emptyAgent=(extra={})=>({modelConnected:true,model:'openai/gpt-4.1-mini',products:[],recommendations:[],messages:[],toolTrace:['Searched live Shop catalog','Refreshed an observed Shop product'],...extra});
 
-test('Gift context UI review: expression chips are multi-select, reversible, local and combine with own words only at submit',async()=>{
-  const h=await harness(()=>{throw new Error('Custom expression controls are local');},{realCustom:true});h.run("setGiftMode('custom')");
-  h.get('gift-form').values={...profile,expression:'A fresh chapter'};clickMeaning(h,'Gratitude');clickMeaning(h,'Courage');
-  assert.equal(h.get('expression-chips').children.find(n=>n.textContent==='Courage')['aria-pressed'],'true');assert.equal(h.calls.length,0);assert.equal(h.run('state.submittedProfile'),null);
-  h.run('submitCustom()');assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');
-  clickMeaning(h,'Courage');assert.equal(h.get('expression-chips').children.find(n=>n.textContent==='Courage')['aria-pressed'],'false');
-  assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');assert.match(uiText(h.get('custom-panel')),/Expressing: Courage; Gratitude; A fresh chapter/);
-  h.run('submitCustom()');assert.equal(h.run('state.submittedProfile.expression'),'Gratitude; A fresh chapter');assert.equal(h.calls.length,0);
-});
 
 test('Gift context UI review: changing meaning, style or lifestyle invalidates set review without sending data',async()=>{
   for(const field of ['meaning','style','lifestyle']){
@@ -669,4 +606,150 @@ test('Empty diagnostics UI review: a genuine no-catalog response is distinct fro
   const p=product('Red','Scented cotton ocean gift');const h=await harness(()=>response(emptyAgent({products:[p],recommendations:[{productId:p.id,variantId:p.variants[0].id,reason:'Verified catalog choice.'}],catalogCounts:{observed:12,refreshed:10,selected:1},selectionDiagnostics:{modelProposedCount:1,acceptedCount:1,rejectionCounts:{},zeroSelectionReason:null}})));h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),1);
   h.get('exclusion-chips').children.find(n=>n['aria-label']==='Fragranced items').listeners.click();assert.equal(h.run('state.result.recommendations.length'),0);assert.equal(h.calls.length,1);
   const text=uiText(h.get('results-content'));assert.match(text,/none remains eligible under the current local exclusions/);assert.match(text,/1: Excluded by your choices/);assert.doesNotMatch(text,/Shop returned no products|model did not propose any main gifts|catalog searches returned no products/);
+});
+
+const technicalFailure=(code='AGENT_LIMIT',stage='tool_arguments')=>({ok:false,json:async()=>({error:{code,stage,message:'The model did not finish this run.'}})});
+const recoveredCatalog=(products=[product()],override={})=>({modelConnected:false,products,recommendations:[],addonProducts:[],messages:[],recovery:{mode:'rules',code:'AGENT_LIMIT',stage:'tool_arguments',observedCount:12,refreshedCount:10},...override});
+
+test('Recovery UI review: valid catalog recovery is transparently rules-only and refreshes the real exact variant',async()=>{
+  const p=product();const h=await harness(payload=>payload.action==='product'?response({product:p,messages:[]}):response(recoveredCatalog([p])));h.get('use-agent').checked=true;await h.run('search()');
+  assert.equal(h.calls.length,1);assert.equal(h.run('state.agentResult'),null);assert.equal(h.run('state.recoveryInfo.mode'),'rules');assert.equal(h.run('state.result.recommendations[0].variant.id'),p.variants[0].id);
+  assert.match(h.get('engine-badge').textContent,/rules/i);assert.doesNotMatch(h.get('engine-badge').textContent,/AI-guided/);assert.match(uiText(h.get('results-content')),/not AI-selected recommendations|not AI recommendations|not an AI recommendation|not a completed AI|not model-selected/i);
+  h.run('openBrief(state.result.recommendations[0])');assert.match(h.get('brief-text').value,/Ranking is rules-based/);assert.doesNotMatch(h.get('brief-text').value,/AI-guided selection via/);
+  await h.run('openProduct(state.result.recommendations[0],null)');assert.equal(h.run('state.active.modelGuided'),false);assert.equal(h.run('state.active.valid'),true);
+  assert.deepEqual(h.calls[1],{action:'product',productId:p.id,selected:p.selected,budget:75});assert.ok(h.calls.every(call=>call.action!=='checkout'&&call.action!=='checkout_set'));
+});
+
+test('Recovery UI review: only valid allowlisted recovery envelopes can become rules results',async()=>{
+  const base=recoveredCatalog();
+  const invalid=[
+    {...base,modelConnected:true}, {...base,recommendations:[{productId:product().id,variantId:product().variants[0].id}]},
+    {...base,recovery:{...base.recovery,mode:'ai'}}, {...base,recovery:{...base.recovery,code:'AGENT_AUTH'}}, {...base,recovery:{...base.recovery,stage:'UNTRUSTED_STAGE'}},
+    {...base,recovery:{...base.recovery,observedCount:-1}}, {...base,recovery:{...base.recovery,observedCount:0}}, {...base,recovery:{...base.recovery,observedCount:1.5}},
+    {...base,recovery:{...base.recovery,observedCount:999999}}, {...base,recovery:{...base.recovery,refreshedCount:13}},
+    {...base,recovery:{...base.recovery,code:'AGENT_INVALID_RESPONSE',stage:'recommendation_validation'}},
+  ];
+  for(const envelope of invalid){const h=await harness(()=>response(envelope));h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.calls.length,1,JSON.stringify(envelope.recovery));assert.equal(h.run('state.agentResult'),null);assert.ok(!h.run('state.result?.recommendations?.length'));assert.ok(!h.run('state.recoveryInfo'));}
+  const allowed=await harness(()=>response(recoveredCatalog([product()],{recovery:{...base.recovery,code:'AGENT_INVALID_RESPONSE',stage:'tool_arguments'}})));allowed.get('use-agent').checked=true;await allowed.run('search()');assert.equal(allowed.run('state.result.recommendations.length'),1);assert.equal(allowed.run('state.agentResult'),null);
+});
+
+test('Recovery UI review: technical HTTP failure runs one bounded focused-rules pass and preserves selected gifts',async()=>{
+  for(const code of ['AGENT_LIMIT','AGENT_TIMEOUT','AGENT_UPSTREAM']){
+    const h=await harness(payload=>payload.consent?technicalFailure(code):response({products:[product()],nextCursor:'more',messages:[]}));await addFixture(h,setProduct('Retained'));const set=h.run('state.setItems'),subtotal=h.run('setSummary().subtotal');
+    h.get('use-agent').checked=true;h.get('gift-form').values={...profile,likes:'They love ocean, gardening and coffee.'};await h.run('search()');
+    assert.equal(h.requests.filter(request=>request.url==='/api/agent').length,1);assert.equal(h.requests.filter(request=>request.url==='/api/shop').length,3);assert.ok(h.calls.filter(call=>call.action==='search').every(call=>call.budget===75));
+    assert.deepEqual(new Set(h.calls.filter(call=>call.action==='search').map(call=>call.query)),new Set(['ocean gifts','gardening gifts','coffee gifts']));
+    assert.equal(h.run('state.agentResult'),null);assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.setItems'),set);assert.equal(h.run('setSummary().subtotal'),subtotal);assert.match(h.get('engine-badge').textContent,/rules/i);
+  }
+});
+
+test('Recovery UI review: auth, input, security and unverified AI errors never trigger fresh catalog fallback',async()=>{
+  for(const code of ['AGENT_AUTH','AGENT_UNAVAILABLE','AGENT_CREDITS','INVALID_AGENT_INPUT','INVALID_REQUEST','AGENT_TOOL_NOT_ALLOWED','AGENT_INVALID_RESPONSE','MODEL_NOT_CONFIGURED']){
+    const h=await harness(()=>technicalFailure(code));h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.calls.length,1,code);assert.equal(h.requests[0].url,'/api/agent');assert.equal(h.run('state.agentResult'),null);assert.ok(!h.run('state.recoveryInfo'));assert.ok(!h.run('state.result?.recommendations?.length'));
+  }
+});
+
+test('Recovery UI review: Star Wars audience, budget and exclusions remain hard constraints in both recovery paths',async()=>{
+  const safe=setProduct('Safe');safe.title='Star Wars mug';safe.description="Men's ceramic Star Wars mug, ages 30-44.";
+  const scented=structuredClone(safe);scented.id+='-scented';scented.variants[0].id+='-scented';scented.description+=' Scented fragrance finish.';
+  const over=structuredClone(safe);over.id+='-over';over.variants[0].id+='-over';over.variants[0].price.amount=10001;
+  const wrongAudience=structuredClone(safe);wrongAudience.id+='-women';wrongAudience.variants[0].id+='-women';wrongAudience.description="Women's Star Wars mug, ages 30-44.";
+  const unrelated=setProduct('Unrelated');const silk=structuredClone(safe);silk.id+='-silk';silk.variants[0].id+='-silk';silk.description+=' Silk lining.';
+  for(const recovered of [true,false]){
+    const products=[safe,scented,over,wrongAudience,unrelated,silk];const h=await harness(payload=>payload.consent?(recovered?response(recoveredCatalog(products)):technicalFailure()):response({products,messages:[]}));
+    h.get('gift-form').values={...profile,likes:'They love Star Wars.',audience:'men',ageBand:'30-44',occasion:'Thank you',budget:100};h.get('use-agent').checked=true;h.run("state.excludedFactors=['fragrance']");await h.run('search()');
+    assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.recommendations[0].product.id'),safe.id);assert.equal(h.run('state.profile.budget'),100);assert.equal(h.run('state.profile.audience'),'men');assert.equal(h.run('state.profile.ageBand'),'30-44');assert.deepEqual(Array.from(h.run('state.excludedFactors')),['fragrance']);assert.equal(h.run('state.profile.dislikes'),'silk');
+    if(!recovered)assert.deepEqual(h.calls[1],{action:'search',query:'Star Wars',budget:100});assert.equal(h.requests.filter(request=>request.url==='/api/agent').length,1);
+  }
+});
+
+test('Recovery UI review: newer submitted search wins over a late recovery envelope',async()=>{
+  const pending=deferred(),fresh=setProduct('Fresh');const h=await harness(payload=>payload.consent?pending.promise:response({products:[fresh],messages:[]}));h.get('use-agent').checked=true;const old=h.run('search()');h.get('use-agent').checked=false;await h.run('search()');
+  pending.resolve(response(recoveredCatalog([setProduct('Stale')])));await old;
+  assert.deepEqual(Array.from(h.run('state.products.map(p=>p.id)')),[fresh.id]);assert.equal(h.run('state.agentResult'),null);assert.ok(!h.run('state.recoveryInfo'));assert.equal(h.calls.length,2);
+});
+
+test('Recovery UI review: dirty preferences or changed budget prevent stale recovery and prevent new fallback requests',async()=>{
+  for(const change of ['likes','budget'])for(const envelope of [true,false]){
+    const pending=deferred();const h=await harness(()=>pending.promise);h.get('use-agent').checked=true;const search=h.run('search()');
+    if(change==='likes'){h.get('gift-form').values.likes='They love gardens.';h.get('gift-form').listeners.input({target:{id:'likes'}});}else{h.get('budget').value='10';h.get('budget').listeners.input();}
+    pending.resolve(envelope?response(recoveredCatalog()):technicalFailure());await search;
+    assert.equal(h.calls.length,1,`${change}/${envelope}`);assert.equal(h.run('state.products.length'),0);assert.ok(!h.run('state.result?.recommendations?.length'));assert.ok(!h.run('state.recoveryInfo'));
+  }
+});
+
+test('Recovery UI review: a pending fresh-catalog fallback cannot overwrite a newer search',async()=>{
+  const pending=deferred(),started=deferred(),fresh=setProduct('Fresh');let reads=0;
+  const h=await harness(payload=>{if(payload.consent)return technicalFailure();if(++reads===1){started.resolve();return pending.promise;}return response({products:[fresh],messages:[]});});
+  h.get('use-agent').checked=true;const old=h.run('search()');await started.promise;h.get('use-agent').checked=false;await h.run('search()');pending.resolve(response({products:[setProduct('Stale')],messages:[]}));await old;
+  assert.deepEqual(Array.from(h.run('state.products.map(p=>p.id)')),[fresh.id]);assert.equal(h.run('state.agentResult'),null);assert.ok(!h.run('state.recoveryInfo'));assert.equal(h.calls.length,3);
+});
+
+test('Recovery UI review: unavailable fresh catalog ends clearly without another model loop or invented products',async()=>{
+  const h=await harness(payload=>payload.consent?technicalFailure('AGENT_TIMEOUT'):{ok:false,json:async()=>({error:{code:'SHOP_UPSTREAM',message:'Catalog unavailable. Try again later.'}})});h.get('use-agent').checked=true;await h.run('search()');
+  assert.equal(h.calls.length,2);assert.equal(h.requests.filter(request=>request.url==='/api/agent').length,1);assert.equal(h.run('state.products.length'),0);assert.equal(h.run('state.agentResult'),null);assert.ok(!h.run('state.result?.recommendations?.length'));
+  assert.match(uiText(h.get('results-content')),/unavailable|retry|try again/i);assert.doesNotMatch(uiText(h.get('results-content')),/Shop returned no products|catalog searches returned no products/);
+});
+
+test('Recovery UI review: strict arrival requirement cannot become eligible through either recovery path',async()=>{
+  for(const envelope of [true,false]){const h=await harness(payload=>payload.consent?(envelope?response(recoveredCatalog()):technicalFailure()):response({products:[product()],messages:[]}));h.get('gift-form').values={...profile,mustArrive:'on',arrivalDeadline:'2099-12-31'};h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),0);assert.match(uiText(h.get('results-content')),/Can’t verify delivery/);assert.doesNotMatch(JSON.stringify(h.calls),/2099|arrivalDeadline|destination/);}
+});
+
+test('Recovery UI review: merchant warnings survive both observed-snapshot and fresh-search recovery',async()=>{
+  const warning={type:'warning',content:'Merchant notice: verify the listed material before choosing.'};
+  for(const envelope of [true,false]){
+    const h=await harness(payload=>payload.consent?(envelope?response(recoveredCatalog([product()],{messages:[warning]})):technicalFailure()):response({products:[product()],messages:[warning]}));h.get('use-agent').checked=true;await h.run('search()');
+    assert.ok(descendants(h.get('results-content')).some(node=>node.textContent===warning.content));assert.equal(h.run('state.agentResult'),null);
+  }
+});
+
+test('Ready-only UI review: custom paths are hidden and custom rendering is neither imported nor initialized',async()=>{
+  const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8'),app=await readFile(new URL('../public/app.mjs',import.meta.url),'utf8');
+  assert.match(html,/<nav[^>]*hidden[^>]*class="gift-paths"/);assert.match(html,/<div[^>]*hidden[^>]*class="gift-mode-switch"/);assert.match(html,/<div id="custom-workspace" hidden/);assert.doesNotMatch(app,/import[^\n]*custom-panel|initCustomPanel\(/);
+  const h=await harness(()=>{throw new Error('Canceled mode must not call a provider');});h.run("setGiftMode('custom')");assert.equal(h.run('state.giftMode'),'ready');assert.equal(h.get('custom-workspace').hidden,true);assert.equal(h.get('ready-made-content').hidden,false);assert.equal(h.custom.options,null);assert.equal(h.calls.length,0);
+});
+
+test('Ready-only UI review: selected meanings and free text enter the snapshot only on Find gifts',async()=>{
+  const h=await harness(()=>response({products:[product()],messages:[]}));h.get('gift-form').values={...profile,expression:'A fresh chapter'};clickMeaning(h,'Gratitude');clickMeaning(h,'Courage');
+  assert.equal(h.calls.length,0);assert.equal(h.run('state.submittedProfile'),null);await h.run('search()');assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');
+  clickMeaning(h,'Courage');h.get('gift-form').values.expression='Unsubmitted words';assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');assert.equal(h.calls.length,1);assert.equal(h.run('state.preferencesDirty'),true);
+  await h.run('search()');assert.equal(h.run('state.submittedProfile.expression'),'Gratitude; Unsubmitted words');assert.equal(h.calls.length,2);assert.equal(h.custom.options,null);
+});
+
+function shirtFixture(label='Shirt'){
+  const p=setProduct(label);p.title='Star Wars T-shirt';p.description="Men's cotton Star Wars T-shirt.";p.options=[{name:'Size',values:[{label:'S'},{label:'M'},{label:'L'}]}];p.selected=[{name:'Size',label:'M'}];p.variants[0].options=p.selected;return p;
+}
+function mugFixture(label='Mug',amount=2400){const p=setProduct(label,amount);p.title=`Star Wars ceramic mug ${label}`;p.description="Men's Star Wars ceramic mug, age 30-44.";return p;}
+
+test('Alternative categories UI review: sizing exclusion hides shirts and fetches real mugs only once without changing the selected set',async()=>{
+  const shirt=shirtFixture(),mug=mugFixture(),over=mugFixture('Over',10001),unrelated=setProduct('Plain');let searching=0;
+  const h=await harness(()=>response({products:++searching<=3?[shirt]:[shirt,mug,over,unrelated],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars.',audience:'men',ageBand:'30-44',budget:100};await h.run('search()');assert.equal(h.calls.length,3);assert.equal(h.run('state.result.recommendations.length'),1);
+  await addFixture(h,mug);const set=h.run('state.setItems'),subtotal=h.run('setSummary().subtotal');h.get('exclusion-chips').children.find(n=>n['aria-label']==='Requires a size choice').listeners.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.calls.length,5);assert.deepEqual(h.calls.slice(3),[{action:'search',query:'Star Wars mugs',budget:100},{action:'search',query:'Star Wars collectibles',budget:100}]);
+  assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.recommendations[0].product.id'),mug.id);assert.equal(h.run('state.setItems'),set);assert.equal(h.run('setSummary().subtotal'),subtotal);assert.ok(!uiText(h.get('results-content')).includes('Star Wars T-shirt'));
+  h.run('render()');await h.run('recoverExcludedOptions()');assert.equal(h.calls.length,5);assert.ok(h.calls.every(call=>call.action==='search'));assert.match(uiText(h.get('results-content')),/Checked two alternative product types once/);
+});
+
+test('Alternative categories UI review: AI-shortlist exclusions reveal only labeled rules extras, never another model call',async()=>{
+  const shirt=shirtFixture(),mug=mugFixture();const h=await harness(payload=>payload.consent?response(emptyAgent({products:[shirt],recommendations:[{productId:shirt.id,variantId:shirt.variants[0].id,reason:'Verified shirt.'}]})):response({products:[mug],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars.',budget:100};h.get('use-agent').checked=true;await h.run('search()');
+  h.get('exclusion-chips').children.find(n=>n['aria-label']==='Clothes & shoes').listeners.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(h.calls.length,3);assert.equal(h.requests.filter(r=>r.url==='/api/agent').length,1);assert.equal(h.run('state.result.recommendations.length'),0);assert.equal(h.run('state.moreProducts.length'),1);
+  assert.match(uiText(h.get('results-content')),/not additional model-selected recommendations/);const card=descendants(h.get('results-content')).find(n=>n.tagName==='article'&&uiText(n).includes(mug.title));assert.ok(card);descendants(card).find(n=>n.textContent==='Gift brief').listeners.click();assert.match(h.get('brief-text').value,/Ranking is rules-based/);
+});
+
+test('Category UI review: no more than five real eligible listings are displayed per category',async()=>{
+  const shirts=Array.from({length:8},(_,i)=>shirtFixture(`Shirt${i}`)),mugs=Array.from({length:7},(_,i)=>mugFixture(`Mug${i}`));const h=await harness(()=>response({products:[...shirts,...mugs],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars.',budget:100};await h.run('search()');
+  const counts=Array.from(h.run('state.result.recommendations.map(rec=>rec.category.groupId)')).reduce((out,id)=>(out[id]=(out[id]||0)+1,out),{});assert.equal(Object.keys(counts).length,2);assert.deepEqual(Object.values(counts).sort(),[5,5]);assert.equal(descendants(h.get('results-content')).filter(n=>n.tagName==='article').length,10);assert.match(uiText(h.get('results-content')),/Up to five per category/);
+});
+
+test('Alternative categories UI review: stale extra reads are discarded after preferences, factors or search change',async()=>{
+  for(const change of ['preferences','factors','search']){
+    const pending=deferred(),shirt=shirtFixture(),mug=mugFixture();let calls=0;
+    const h=await harness(()=>++calls<=3?response({products:[shirt],messages:[]}):calls<=5?pending.promise:response({products:[],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars.',budget:100};await h.run('search()');
+    h.get('exclusion-chips').children.find(n=>n['aria-label']==='Requires a size choice').listeners.click();assert.equal(h.calls.length,5);
+    if(change==='preferences'){h.get('gift-form').values.dislikes='ceramic';h.get('gift-form').listeners.input({target:{id:'dislikes'}});}
+    else if(change==='factors'){h.get('exclusion-chips').children.find(n=>n['aria-label']==='Fragranced items').listeners.click();}
+    else{h.run('state.excludedFactors=[]');await h.run('search()');}
+    pending.resolve(response({products:[mug],messages:[{type:'warning',content:'STALE EXTRA WARNING'}]}));await new Promise(resolve=>setImmediate(resolve));
+    assert.ok(!h.run('state.products.some(p=>p.id.endsWith("Mug"))'));assert.ok(!uiText(h.get('results-content')).includes('STALE EXTRA WARNING'));assert.equal(h.run('state.diversifyBusy'),false);
+  }
 });

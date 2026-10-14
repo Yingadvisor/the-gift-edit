@@ -104,3 +104,9 @@ No license has been assigned to code or artwork. Public visibility alone does no
 ## v0.5.1 diagnostic correction
 
 Model proposals, accepted results and deterministic rejection counts are distinct. An empty shortlist never claims the upstream catalog was empty when products were found. Existing budget, variant, exclusion and relevance checks remain unchanged. The four flat artworks are unmodified, hash-verified pre-existing original source files; no new generation or licensing claim is made.
+
+## v0.5.2 focused ready-made release
+
+The public workflow now exposes only real Shop products and the gift set; custom/pattern controls are withdrawn. Recoverable model limit/timeout/upstream failures return actual rules-screened catalog snapshots, visibly not AI-selected. If no snapshots are available, the UI makes one bounded fresh catalog recovery, preserving the submitted interests, budget and exclusions. The model keeps its six-turn, sixteen-read and 45-second limits.
+
+Results are grouped with a maximum of five per category, aiming for three to five when real eligible products exist. A concentrated first page or sizing/clothes exclusions can trigger at most two alternative same-theme category reads within the existing server budget. A post-search sizing/clothes chip can trigger one two-category rules-screened retrieval; selected set items stay intact. No missing products are fabricated and no constraints are relaxed.

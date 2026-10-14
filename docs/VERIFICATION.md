@@ -49,3 +49,9 @@
 - A user screenshot showed 12 found, 10 refreshed, zero selected with three unknown selected factors. The old response cannot determine model-empty versus filtered proposals. New allowlisted diagnostic counts make that distinction; constraints are not weakened.
 - Expression chips plus free text moved below avoidances; Audience, Style and Lifestyle separated. Relevant Pattern / motif choices use four unchanged original artworks, then existing exact product prototypes. No product-type selector, irrelevant default recommendations or licensed-franchise substitution.
 - Current local full suite and build pass; direct release/deployment verification follows separately.
+
+## v0.5.2 P0 repair verification
+
+- 345 local tests and production build pass, including synthetic exhausted-tool recovery, Protection and care with Star Wars, real-fixture alternate-category retrieval, sizing exclusions, category caps, set retention, and stale-response protection.
+- Recovery remains explicitly rules-only and uses real observed catalog snapshots or one bounded new catalog pass. Unsupported tools and fabricated final recommendation IDs remain fatal.
+- Public custom controls are withdrawn. No new live browser claim is made before this release’s deployment is checked; earlier cloud-browser actions became approval-blocked and were not retried.

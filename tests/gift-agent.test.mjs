@@ -69,7 +69,7 @@ test('model text is never passed through as a factual recommendation', async () 
 });
 test('tool loops and time are bounded', async () => {
   const h = harness(Array.from({length: 8}, (_, n) => tool('search_catalog', {query: 'gifts'}, n)));
-  await rejectsCode(() => runGiftAgent(profile, h.options), 'AGENT_LIMIT'); assert.equal(h.modelCalls.length, 6);
+  const recovered=await runGiftAgent(profile,h.options);assert.equal(recovered.recovery.code,'AGENT_LIMIT');assert.equal(recovered.recovery.limitReason,'final_step_tools');assert.equal(recovered.modelConnected,false);assert.equal(h.modelCalls.length,6);
   await rejectsCode(() => runGiftAgent(profile, {callModel: () => new Promise(() => {}), timeoutMs: 10}), 'AGENT_TIMEOUT');
   const batch = search(); batch.tool_calls = Array.from({length: 17}, (_, n) => tool('search_catalog', {query: 'gifts'}, n).tool_calls[0]);
   const big = harness([batch]); await rejectsCode(() => runGiftAgent(profile, big.options), 'AGENT_LIMIT'); assert.equal(big.shopCalls.length, 0);
@@ -156,7 +156,7 @@ test('main gift selection filters greeting-card products but keeps inexpensive r
  assert.equal((await runGiftAgent({...profile,budget:100},harness(undefined,mug).options)).recommendations.length,1);
 });
 test('returns ten exact refreshed choices with refresh concurrency capped at three',async()=>{
- const products=Array.from({length:10},(_,n)=>{const p=product();p.id=`gid://shopify/Product/p${n}`;p.variants[0].id=`gid://shopify/ProductVariant/v${n}`;return p;});
+ const products=Array.from({length:10},(_,n)=>{const p=product();p.title=n<5?'Ocean mug':'Ocean pillow';p.id=`gid://shopify/Product/p${n}`;p.variants[0].id=`gid://shopify/ProductVariant/v${n}`;return p;});
  const batch={role:'assistant',tool_calls:products.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
  const final={role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:products.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})};
  const replies=[search(),batch,final];let active=0,peak=0;const requests=[];
@@ -282,4 +282,68 @@ test('style and lifestyle are separate secondary context, not query restrictions
  assert.equal(out.recommendations.length,1);assert.equal(h.shopCalls[0].args.catalog.query,'ocean gifts');
  const sent=JSON.parse(h.modelCalls[0].messages[1].content);assert.equal(sent.style,'minimalist');assert.equal(sent.lifestyle,'healthcare');assert.equal(sent.audience,'any');
  for(const delta of [{style:'women'},{lifestyle:'men'},{style:1},{lifestyle:{job:'doctor'}}])await rejectsCode(()=>runGiftAgent({...profile,...delta},harness().options),'INVALID_AGENT_INPUT');
+});
+test('bounded recovery: oversized batch after observed catalog returns rules-only actual products',async()=>{
+ const batch={role:'assistant',tool_calls:Array.from({length:16},(_,n)=>tool('get_product',{productId:id,selected:[]},n+2).tool_calls[0])};
+ const h=harness([search(),batch]);const result=await runGiftAgent(profile,h.options);
+ assert.equal(result.recovery.mode,'rules');assert.equal(result.recovery.code,'AGENT_LIMIT');assert.equal(result.recovery.limitReason,'oversized_batch');assert.equal(result.recovery.observedCount,1);assert.equal(result.recovery.refreshedCount,0);
+ assert.equal(result.modelConnected,false);assert.deepEqual(result.recommendations,[]);assert.equal(result.products[0].id,id);assert.equal(h.shopCalls.length,1);
+ assert.match(h.modelCalls[1].messages[2].content,/Remaining read-only tool allowance: 15/);
+});
+test('bounded recovery: exhausted tool allowance disables tools and preserves latest filtered snapshot',async()=>{
+ const h=harness([search(),refresh()]);const result=await runGiftAgent(profile,{...h.options,maxTools:1});
+ assert.equal(h.modelCalls[1].toolChoice,'none');assert.equal(result.recovery.limitReason,'oversized_batch');assert.equal(h.shopCalls.length,1);
+ const stale=product(),fresh=product();fresh.variants[0].price.amount=10000;
+ const h2=harness([search(),refresh(),search()]);h2.options.callShop=async name=>name==='search_catalog'?{products:[stale]}:{product:fresh};
+ const out=await runGiftAgent(profile,{...h2.options,maxSteps:3});assert.equal(out.recovery.limitReason,'final_step_tools');assert.deepEqual(out.products,[]);
+});
+test('bounded recovery: observed snapshots retain hard theme/audience/dislike/stock/budget filters',async()=>{
+ const products=['Star Wars mug',"Women's Star Wars necklace",'Plain necklace','Star Wars silk scarf','Star Wars unavailable mug','Star Wars expensive mug'].map((title,n)=>{const p=product();p.id=`gid://shopify/Product/recovery${n}`;p.title=title;p.description={plain:title};p.variants[0].id=`gid://shopify/ProductVariant/recovery${n}`;return p;});
+ products[4].variants[0].availability.available=false;products[5].variants[0].price.amount=10001;
+ const h=harness([search(),search()]);h.options.callShop=async()=>({products});
+ const result=await runGiftAgent({...profile,query:'Star Wars',likes:'They enjoy Star Wars',audience:'men',dislikes:'silk',budget:100},{...h.options,maxSteps:2});
+ assert.deepEqual(result.products.map(p=>p.id),[products[0].id]);assert.equal(result.modelConnected,false);
+});
+test('bounded recovery: observed data permits timeout/upstream recovery but never unsupported or fabricated selection',async()=>{
+ for(const kind of ['upstream','timeout']){
+  let n=0;const result=await runGiftAgent(profile,{timeoutMs:20,callShop:async()=>({products:[product()]}),callModel:async()=>{if(n++===0)return search();if(kind==='timeout')return new Promise(()=>{});throw new Error('PRIVATE_PROVIDER');}});
+  assert.equal(result.recovery.code,kind==='timeout'?'AGENT_TIMEOUT':'AGENT_UPSTREAM');assert.equal(result.products.length,1);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_PROVIDER/);
+ }
+ const bad=harness([search(),tool('create_checkout',{},2)]);await rejectsCode(()=>runGiftAgent(profile,bad.options),'AGENT_TOOL_NOT_ALLOWED');
+ await rejectsCode(()=>runGiftAgent(profile,harness([search(),refresh(),finish({productId:'gid://shopify/Product/fabricated'})]).options),'AGENT_INVALID_RESPONSE');
+});
+test('bounded diversification: sizing exclusion retrieves actual Star Wars mugs and collectibles instead of only shirts',async()=>{
+ const shirts=Array.from({length:12},(_,n)=>{const p=product();p.id=`gid://shopify/Product/shirt${n}`;p.title="Men's Star Wars shirt";p.options=[{name:'Size',values:[{label:'M'},{label:'L'}]}];p.variants[0].options=[{name:'Size',label:'M'}];p.variants[0].id=`gid://shopify/ProductVariant/shirt${n}`;return p;});
+ const mug=product();mug.title='Star Wars mug';const collectible=product();collectible.id='gid://shopify/Product/collectible';collectible.title='Star Wars collectible';collectible.variants[0].id='gid://shopify/ProductVariant/collectible';
+ const h=harness();h.options.callShop=async(name,args)=>{h.shopCalls.push({name,args});if(name==='get_product')return {product:mug};return {products:args.catalog.query==='Star Wars'?shirts:args.catalog.query==='Star Wars mugs'?[mug]:[collectible]};};
+ const out=await runGiftAgent({...profile,likes:'They like Star Wars',query:'Star Wars',budget:100,audience:'men',ageBand:'30-44',expression:'Protection and care',excludedFactors:['sizing']},h.options);
+ assert.deepEqual(h.shopCalls.map(c=>c.args.catalog.query).filter(Boolean),['Star Wars','Star Wars mugs','Star Wars collectibles']);assert.equal(h.shopCalls.length,4);
+ const projected=JSON.parse(h.modelCalls[1].messages.at(-1).content).untrustedCatalogData.products;assert.equal(projected[0].id,mug.id);assert.equal(projected[1].id,collectible.id);assert.equal(projected.length,12);
+ assert.equal(out.recommendations.length,1);assert.equal(out.catalogCounts.observed,14);assert.equal(out.toolTrace.filter(t=>t.includes('alternative')).length,2);
+ assert.ok(h.shopCalls.every(c=>!JSON.stringify(c).includes('Protection and care')));
+});
+test('bounded diversification respects remaining real tool budget and skips model multi-search batches',async()=>{
+ const shirt=product();shirt.title='Ocean shirt';
+ const h=harness([search(),{role:'assistant',content:JSON.stringify({recommendations:[],summary:''})}],shirt);
+ await runGiftAgent({...profile,excludedFactors:['clothes-shoes']},{...h.options,maxTools:2});assert.equal(h.shopCalls.length,2);assert.equal(h.modelCalls[1].toolChoice,'none');
+ const batch=search();batch.tool_calls.push(tool('search_catalog',{query:'ocean mugs'},2).tool_calls[0]);
+ const multiple=harness([batch,{role:'assistant',content:JSON.stringify({recommendations:[],summary:''})}],shirt);
+ await runGiftAgent({...profile,excludedFactors:['clothes-shoes']},multiple.options);assert.equal(multiple.shopCalls.length,2);
+});
+test('category diversity: clustered first page triggers only two real alternate reads without exclusions',async()=>{
+ const shirts=Array.from({length:6},(_,n)=>{const p=product();p.id=`gid://shopify/Product/cluster${n}`;p.title='Star Wars shirt';return p;});
+ const h=harness([search(),{role:'assistant',content:JSON.stringify({recommendations:[],summary:''})}]);h.options.callShop=async(name,args)=>{h.shopCalls.push({name,args});return {products:shirts};};
+ await runGiftAgent({...profile,query:'Star Wars',likes:'They like Star Wars'},h.options);
+ assert.deepEqual(h.shopCalls.map(c=>c.args.catalog.query),['Star Wars','Star Wars mugs','Star Wars collectibles']);
+});
+test('category diversity: final selection caps a category at five and records actual rejected count',async()=>{
+ const products=Array.from({length:8},(_,n)=>{const p=product();p.id=`gid://shopify/Product/cap${n}`;p.variants[0].id=`gid://shopify/ProductVariant/cap${n}`;return p;});
+ const batch={role:'assistant',tool_calls:products.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const replies=[search(),batch,{role:'assistant',content:JSON.stringify({recommendations:products.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title})),summary:''})}];
+ const result=await runGiftAgent(profile,{callModel:async()=>replies.shift(),callShop:async(name,args)=>name==='search_catalog'?{products}:{product:products.find(p=>p.id===args.catalog.id)}});
+ assert.equal(result.recommendations.length,5);assert.equal(result.selectionDiagnostics.rejectionCounts.category_limit,3);assert.equal(result.selectionDiagnostics.modelProposedCount,8);
+});
+test('rules recovery preserves already collected merchant warnings',async()=>{
+ const h=harness([search(),refresh(),search()]);const result=await runGiftAgent(profile,{...h.options,maxSteps:3});
+ assert.equal(result.modelConnected,false);assert.deepEqual(result.messages,[{type:'warning',content:'Tax and shipping extra'}]);
 });

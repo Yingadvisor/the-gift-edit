@@ -50,3 +50,7 @@
 - Around 21:17–21:25 UTC, corrected empty-selection reporting and added allowlisted proposal/rejection counts without relaxing constraints. User requested expression chips below the form, separate audience/style/lifestyle, and relevant pattern-first custom choices. Four original flat artworks were retrieved from Arcade-Original-Artwork.zip, inspected and copied without modification; hashes are recorded in asset-provenance.json.
 - User explicitly authorized direct correction/release rather than another manual upload. A fresh main lease and non-force update are required; prior canceled unrelated ref writes are not retried.
 - Successful bounded live AI tool use was independently observed on the already-deployed v0.5 coffee/$100 case at 21:19:59 UTC. Checkout remains untested live.
+
+## v0.5.2 P0 correction
+
+- At 21:31 UTC the user reported AGENT_LIMIT at tool_arguments for Star Wars, later identifying Protection and care and a sizing exclusion. This was an actual run-level failure, distinct from earlier successful runs. Added bounded, honestly labeled rules recovery from actual catalog data, explicit remaining-tool guidance, category diversification/caps, and removed custom controls per the user’s latest scope. No tool limit was increased, no checkout or payment was tested, and no real result was fabricated.
