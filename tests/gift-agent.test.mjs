@@ -22,6 +22,7 @@ test('model chooses tools; server enforces US/USD/budget, refreshes, preserves m
   assert.match(result.recommendations[0].reason, /\$24.00 USD/); assert.equal(result.messages.length, 1);
   assert.equal(h.modelCalls[2].messages.at(-1).role, 'tool'); assert.match(h.modelCalls[2].messages.at(-1).content, /untrustedCatalogData/);
   assert.deepEqual(result.toolTrace, ['Searched live Shop catalog', 'Refreshed an observed Shop product']);
+  assert.deepEqual(result.catalogCounts,{observed:1,refreshed:1,selected:1});
 });
 test('semantic selection does not require lexical positive preference overlap', async () => {
   const h = harness(); const result = await runGiftAgent({...profile, likes: 'They like useful objects for slow mornings.'}, h.options);
@@ -125,7 +126,7 @@ test('diagnostic: Gateway HTTP failures use static safe error codes without prov
 });
 test('diagnostic: failures expose only bounded execution stages',async()=>{
  await assert.rejects(()=>runGiftAgent(profile,{callModel:()=>{throw new Error('PRIVATE_PROMPT')}}),e=>e.stage==='model'&&e.code==='AGENT_UPSTREAM'&&!e.message.includes('PRIVATE'));
- const h=harness([tool('get_product',{productId:id,selected:[]})]);await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.stage==='tool_arguments'&&e.code==='AGENT_INVALID_RESPONSE');
+ const malformed=tool('get_product',{productId:id,selected:[]});malformed.tool_calls[0].id='';const h=harness([malformed]);await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.stage==='tool_arguments'&&e.code==='AGENT_INVALID_RESPONSE');
 });
 test('resilience: featured variant options can ground a refresh without product option table',async()=>{
  const p=product();delete p.options;delete p.selected;p.variants[0].options=[{name:'Color',label:'Blue'}];
@@ -186,4 +187,81 @@ test('self-gift context enables first-person recipient interests without identit
  const other=harness();await runGiftAgent(profile,other.options);assert.equal(JSON.parse(other.modelCalls[0].messages[1].content).selfGift,false);
  for(const selfGift of [false,undefined])await rejectsCode(()=>runGiftAgent({...profile,likes:'I love ocean walks.',selfGift},harness().options),'INVALID_AGENT_INPUT');
  for(const selfGift of ['true',1,null,{}])await rejectsCode(()=>runGiftAgent({...profile,selfGift},harness().options),'INVALID_AGENT_INPUT');
+});
+
+test('argument repair: malformed JSON can be repaired without dispatch or raw error reflection',async()=>{
+ const bad=search();bad.tool_calls[0].function.arguments='{ PRIVATE_INVALID_JSON';
+ const h=harness([bad,tool('search_catalog',{query:'ocean mug'},2),tool('get_product',{productId:id,selected:[]},3),finish()]);
+ const out=await runGiftAgent(profile,h.options);assert.equal(out.recommendations.length,1);
+ assert.deepEqual(h.shopCalls.map(c=>c.name),['search_catalog','get_product']);
+ const feedback=JSON.parse(h.modelCalls[1].messages.at(-1).content);assert.equal(feedback.error.reason,'malformed_json');assert.equal(feedback.error.batchExecuted,false);
+ assert.doesNotMatch(JSON.stringify(feedback),/PRIVATE_INVALID_JSON/);
+});
+test('argument repair: unknown product invalidates entire batch and corrected exact batch succeeds',async()=>{
+ const bad=refresh();bad.tool_calls.push(tool('get_product',{productId:'gid://shopify/Product/unknown',selected:[]},3).tool_calls[0]);
+ const h=harness([search(),bad,tool('get_product',{productId:id,selected:[]},4),finish()]);
+ const out=await runGiftAgent(profile,h.options);assert.equal(out.recommendations.length,1);assert.equal(h.shopCalls.length,2);
+ const feedback=h.modelCalls[2].messages.filter(m=>m.role==='tool').slice(-2).map(m=>JSON.parse(m.content));
+ assert.ok(feedback.every(f=>f.error.reason==='unobserved_product'&&f.error.batchExecuted===false));
+});
+test('argument repair: unobserved option stays blocked until model chooses an observed label',async()=>{
+ const p=product();p.options=[{name:'Color',values:[{label:'Blue'}]}];p.selected=[{name:'Color',label:'Blue'}];p.variants[0].options=p.selected;
+ const h=harness([search(),tool('get_product',{productId:id,selected:[{name:'Color',label:'Invented'}]},2),tool('get_product',{productId:id,selected:p.selected},3),finish()],p);
+ assert.equal((await runGiftAgent(profile,h.options)).recommendations.length,1);assert.equal(h.shopCalls.length,2);
+ assert.equal(JSON.parse(h.modelCalls[2].messages.at(-1).content).error.reason,'unobserved_option');
+});
+test('argument repair: two repairs maximum, static issue on exhaustion, no unsupported-tool recovery',async()=>{
+ const h=harness([1,2,3].map(n=>tool('search_catalog',{query:'gifts',override:true},n)));
+ await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.code==='AGENT_INVALID_RESPONSE'&&e.stage==='tool_arguments'&&e.argumentIssue==='unknown_fields');
+ assert.equal(h.modelCalls.length,3);assert.equal(h.shopCalls.length,0);
+ const batch=tool('get_product',{productId:id,selected:[]});batch.tool_calls.push(tool('create_checkout',{},2).tool_calls[0]);
+ const unsupported=harness([batch]);await rejectsCode(()=>runGiftAgent(profile,unsupported.options),'AGENT_TOOL_NOT_ALLOWED');assert.equal(unsupported.modelCalls.length,1);assert.equal(unsupported.shopCalls.length,0);
+ const duplicate=search();duplicate.tool_calls.push(duplicate.tool_calls[0]);
+ await assert.rejects(()=>runGiftAgent(profile,harness([duplicate]).options),e=>e.argumentIssue==='duplicate_call_id');
+});
+
+test('theme and audience: Star Wars men rejects unrelated or women-marked gifts, not necklaces generally',async()=>{
+ const input={...profile,query:'Star Wars gifts for men',budget:100,audience:'any',ageBand:'30-44'};
+ for(const [title,count] of [["Women's Star Wars necklace",0],["Men's silver necklace",0],["Men's Star Wars necklace",1],['Star Wars necklace',1]]){
+  const p=product();p.title=title;const h=harness(undefined,p);const out=await runGiftAgent(input,h.options);assert.equal(out.recommendations.length,count,title);
+  assert.match(h.shopCalls[0].args.catalog.query,/Star Wars/);
+  const sent=JSON.parse(h.modelCalls[0].messages[1].content);assert.equal(sent.audience,'men');assert.equal(sent.ageBand,'30-44');assert.equal(Object.hasOwn(sent,'recipient'),false);
+  if(title==='Star Wars necklace')assert.equal(out.recommendations[0].audienceAssessment.audienceStatus,'unknown');
+ }
+ for(const delta of [{audience:'boys'},{ageBand:'12-17'},{ageBand:30},{audience:{gender:'men'}}])await rejectsCode(()=>runGiftAgent({...input,...delta},harness().options),'INVALID_AGENT_INPUT');
+});
+test('optional add-ons use only eligible observed catalog entries and are never main recommendations',async()=>{
+ const p=product();p.title='Star Wars greeting card';p.variants[0].price.amount=400;
+ const h=harness([search(),{role:'assistant',content:JSON.stringify({recommendations:[],summary:'No main gifts'})}],p);
+ const out=await runGiftAgent({...profile,query:'Star Wars gifts',budget:100},h.options);
+ assert.equal(out.recommendations.length,0);assert.equal(out.products.length,0);assert.equal(out.addonProducts.length,1);assert.equal(h.shopCalls.length,1);
+ const bad=product();bad.title="Women's Star Wars greeting card";
+ const other=harness([search(),{role:'assistant',content:JSON.stringify({recommendations:[],summary:''})}],bad);
+ assert.equal((await runGiftAgent({...profile,query:'Star Wars gifts',audience:'men'},other.options)).addonProducts.length,0);
+});
+
+test('expression is bounded non-identifying semantic context, not a default card request',async()=>{
+ const h=harness();await runGiftAgent({...profile,expression:'Protection, courage, and enduring companionship.'},h.options);
+ const sent=JSON.parse(h.modelCalls[0].messages[1].content);assert.equal(sent.expression,'Protection, courage, and enduring companionship.');
+ assert.equal(Object.hasOwn(sent,'recipient'),false);assert.equal(Object.hasOwn(sent,'relationship'),false);
+ assert.match(h.modelCalls[0].messages[0].content,/Never infer a greeting-card request from expression or occasion/);
+ const card=product();card.title='Ocean greeting card';
+ const result=await runGiftAgent({...profile,expression:'A greeting card expressing courage',occasion:'Birthday'},harness(undefined,card).options);
+ assert.equal(result.recommendations.length,0);assert.equal(result.addonProducts.length,1);
+ for(const expression of [null,12,{},'x'.repeat(401),'Contact private@example.com','https://private.example.com','Call 415-555-1234']){
+  const bad=harness();await rejectsCode(()=>runGiftAgent({...profile,expression},bad.options),'INVALID_AGENT_INPUT');assert.equal(bad.modelCalls.length,0);
+ }
+ const missing=harness();await runGiftAgent(profile,missing.options);assert.equal(JSON.parse(missing.modelCalls[0].messages[1].content).expression,'');
+});
+test('retrieval priority: first named-theme search is exact, subsequent searches remain focused',async()=>{
+ const p=product();p.title='Star Wars mug';
+ const h=harness([tool('search_catalog',{query:'birthday Star Wars gardening coffee men gifts'},1),tool('search_catalog',{query:'Star Wars mugs for men birthday courage gardening'},2),tool('get_product',{productId:id,selected:[]},3),finish()],p);
+ await runGiftAgent({...profile,likes:'They like Star Wars, coffee and gardening.',query:'Star Wars coffee gardening gifts',audience:'men',ageBand:'30-44',expression:'Courage',occasion:'Birthday'},h.options);
+ assert.equal(h.shopCalls[0].args.catalog.query,'Star Wars coffee gardening gifts');assert.equal(h.shopCalls[1].args.catalog.query,'Star Wars mugs');
+});
+test('retrieval priority: any nonempty primary query wins over model expression drift',async()=>{
+ const h=harness([tool('search_catalog',{query:'gratitude birthday sentimental gifts'},1),refresh(),finish()]);
+ await runGiftAgent({...profile,likes:'They enjoy mechanical keyboards.',query:'mechanical keyboards gifts',expression:'Gratitude',occasion:'Birthday'},h.options);
+ assert.equal(h.shopCalls[0].args.catalog.query,'mechanical keyboards gifts');
+ const empty=harness();await runGiftAgent({...profile,query:''},empty.options);assert.equal(empty.shopCalls[0].args.catalog.query,'ocean ceramic gifts');
 });

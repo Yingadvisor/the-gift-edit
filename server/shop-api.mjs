@@ -5,6 +5,7 @@ import {reviewContent} from '../src/product-review.mjs';
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_BUDGET_CENTS = 1_000_000;
 const SET_REFRESH_BUDGET_MS = 25000;
+const MAX_CURSOR_LENGTH = 4096;
 const CONTEXT = Object.freeze({address_country: 'US', currency: 'USD'});
 const CHECKOUT_STATUSES = new Set(['incomplete', 'requires_escalation', 'ready_for_complete', 'complete_in_progress', 'completed', 'canceled']);
 const GID = /^gid:\/\/shopify\/[A-Za-z][A-Za-z0-9_-]*\/[A-Za-z0-9_-]+$/;
@@ -248,12 +249,26 @@ export function createShopHandler({fetchImpl = globalThis.fetch, now = () => Dat
       const body = await readBody(req);
       let result;
       if (body.action === 'search') {
-        exactKeys(body, ['action', 'query', 'budget']);
+        exactKeys(body, ['action', 'query', 'budget', 'cursor']);
         const query = shortString(body.query, 240, 'search query').trim();
         const max = budgetCents(body.budget);
-        const data = await client.callTool('search_catalog', {catalog: {query, ...catalogContext(max), pagination: {limit: 12}}});
+        const cursor = body.cursor === undefined ? undefined : shortString(body.cursor, MAX_CURSOR_LENGTH, 'pagination cursor');
+        const pagination = {limit: 12};
+        if (cursor !== undefined) pagination.cursor = cursor;
+        const data = await client.callTool('search_catalog', {catalog: {query, ...catalogContext(max), pagination}});
         if (!Array.isArray(data.products) || data.products.length > 50 || data.products.some(product => !isRecord(product))) throw new ShopError('UPSTREAM_INVALID_RESPONSE');
-        result = {products: data.products, messages: messages(data), fetchedAt: new Date(now()).toISOString(), context: {country: 'US', currency: 'USD'}};
+        // Cursors are opaque: preserve exact bytes, never decode or fabricate an
+        // offset. The browser keeps the original query/budget for the next page.
+        let nextCursor = null;
+        if (data.pagination !== undefined) {
+          if (!isRecord(data.pagination) || typeof data.pagination.has_next_page !== 'boolean') throw new ShopError('UPSTREAM_INVALID_RESPONSE');
+          if (data.pagination.has_next_page) {
+            const candidate = data.pagination.cursor;
+            if (typeof candidate !== 'string' || !candidate.trim() || candidate.length > MAX_CURSOR_LENGTH || /[\u0000-\u001f\u007f]/.test(candidate)) throw new ShopError('UPSTREAM_INVALID_RESPONSE');
+            if (candidate !== cursor) nextCursor = candidate;
+          }
+        }
+        result = {products: data.products, nextCursor, messages: messages(data), fetchedAt: new Date(now()).toISOString(), context: {country: 'US', currency: 'USD'}};
       } else if (body.action === 'product') {
         exactKeys(body, ['action', 'productId', 'selected', 'budget']);
         const id = identifier(body.productId, 'product ID');

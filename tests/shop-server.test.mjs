@@ -545,3 +545,47 @@ test('set refresh reaching budget on final read refuses write and releases guard
   assert.equal((await invoke(handler, {...request, requestId: randomUUID()})).status, 200);
   assert.equal(mock.calls.length, 5);
 });
+
+test('search pagination forwards exact opaque cursor with the same query, market and budget', async () => {
+  const cursor = 'opaque+/cursor==%2F';
+  const mock = mockFetch([
+    {products: [freshProduct()], pagination: {cursor, has_next_page: true, total_count: 100}},
+    {products: [], pagination: {has_next_page: false, cursor: null}},
+  ]);
+  const handler = createShopHandler(mock);
+  const first = await invoke(handler, searchRequest());
+  assert.equal(first.status, 200); assert.equal(first.body.nextCursor, cursor);
+  assert.deepEqual(mock.calls[0].request.params.arguments.catalog.pagination, {limit: 12});
+  const second = await invoke(handler, {...searchRequest(), cursor: first.body.nextCursor});
+  assert.equal(second.status, 200); assert.equal(second.body.nextCursor, null);
+  assert.deepEqual(mock.calls[1].request.params.arguments, {catalog: {query: 'rain jacket', ...expectedContext, pagination: {limit: 12, cursor}}});
+  assertNoWrite(mock.calls);
+});
+
+test('search without upstream pagination stays compatible and never fabricates a next page', async () => {
+  const mock = mockFetch([{products: []}, {products: [], pagination: {has_next_page: false, cursor: 'not-a-next-page', total_count: 9999}}, {products: [], pagination: {has_next_page: true, cursor: 'same'}}]);
+  const handler = createShopHandler(mock);
+  assert.equal((await invoke(handler, searchRequest())).body.nextCursor, null);
+  assert.equal((await invoke(handler, searchRequest())).body.nextCursor, null);
+  assert.equal((await invoke(handler, {...searchRequest(), cursor: 'same'})).body.nextCursor, null);
+});
+
+test('invalid search cursors and caller pagination limits fail before network use', async () => {
+  for (const cursor of ['', ' ', 'x'.repeat(4097), 'bad\nvalue', 'bad\u0000value', {}, [], null, 1]) {
+    const mock = mockFetch([]);
+    assert.equal((await invoke(createShopHandler(mock), {...searchRequest(), cursor})).status, 400);
+    assert.equal(mock.calls.length, 0);
+  }
+  const mock = mockFetch([]);
+  assert.equal((await invoke(createShopHandler(mock), {...searchRequest(), limit: 1000})).status, 400);
+  assert.equal(mock.calls.length, 0);
+});
+
+test('malformed or oversized upstream next cursors are rejected without leaking them', async () => {
+  for (const pagination of [null, [], {has_next_page: 'true', cursor: 'abc'}, {has_next_page: true}, ...['', ' ', 'x'.repeat(4097), 'bad\nvalue', 1].map(cursor => ({has_next_page: true, cursor}))]) {
+    const mock = mockFetch([{products: [], pagination}]);
+    const result = await invoke(createShopHandler(mock), searchRequest());
+    assert.equal(result.body.error.code, 'UPSTREAM_INVALID_RESPONSE');
+    assert.equal(result.body.nextCursor, undefined); assertNoWrite(mock.calls);
+  }
+});

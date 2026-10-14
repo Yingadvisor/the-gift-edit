@@ -1,18 +1,22 @@
 # Verification record · 2026-10-14 UTC
 
-## Current local v0.4 gift-set release
+## Current local v0.5 usability and model-repair release
 
 - Node.js 24.19.0; source supports Node.js 22+ with no runtime package dependencies.
-- `npm test`: 232 passing tests, including independent UI/async review. Production build passed. All local tests use synthetic model and commerce responses; no real checkout is created.
+- `npm test`: 307 passing tests, including independent UI/async review. Production build passed. All local tests use synthetic model and commerce responses; no real checkout is created.
 - Primary gifts: default target 10 distinct choices, aiming for at least 5 when real eligible results exist. Cards, wrapping, empty boxes and party add-ons are excluded as primary gifts unless explicitly requested. Fewer real choices are never padded with invented items. Soft value/category preferences never force spending the budget.
 - Set constraints: exact USD cents, six unique variants, quantity one each, aggregate budget checks, duplicate rejection, separate merchant groups, current exclusions, exact option review and public-details hashes.
 - Merchant-group API: refreshes every item before any write, rejects changed price/stock/currency/seller/options/details, exact returned line-item validation, preserves warnings and complete continue URL, strips private fields. The set refresh phase must finish within a 25-second pre-write budget or no checkout is dispatched. Pending/uncertain variant overlaps are blocked across both group and single-item requests.
 - UI regression tests cover add/remove without checkout, budget reduction, changed exclusions/preferences, stale refreshes, delayed checkout modal isolation, merchant notices, optionless products and lost recipient-provenance prevention.
 - Strict arrival deadline is a **local fail-closed control**, not completed delivery verification. Current documented Shop catalog responses have no supported destination-specific arrival ETA. Unknown or unsupported arrival evidence cannot qualify, even if stock is available or ships_to matches. No date, address or destination is sent by this control, and no checkout is created to obtain an estimate. Merchant dispatch/policy retrieval is not implemented.
-- Ready-made Shop gifts and Custom-made Expression Atelier are separate entry paths. Custom brief copying stays local; there is no automatic handoff, custom quote, stock, shipping or manufacturing promise.
+- Ready-made and Custom-made are direct switches in the same right-hand workspace, with all form state retained. After submission, custom mode shows five product types and four original motif choices; selection updates inline without re-entry or mandatory brief copying. No external Atelier write or receiving integration exists. Unsupported combinations are marked unrendered.
 - Self-gifting: explicit Myself mode does not require a recipient name, accepts first-person interests only in that context, uses you-focused labels, and shares only a boolean context with the model. Other-recipient giver-preference guards remain.
+- Audience and age: optional generic adult-only context feeds both rule queries and the model. Explicit incompatible audience is filtered, unknown suitability disclosed. Men’s necklaces are not blanket excluded. Named Star Wars / quoted themes are required in merchant evidence, with negation handling. Cards remain optional add-ons or explicit-request main results.
+- Query priority: optional expression replaces the raw query field; generic interest extraction keeps recipient identity local. Named themes use exact first retrieval; secondary occasion/expression never replace them. Rules mode uses up to three separate focused searches, and Show more retrieves bounded opaque-cursor pages while preserving the set. Model-extra pages are labeled rules-only. No upstream count or all-inventory completeness claim is made.
+- Language scope: limited explicit Chinese aliases for Star Wars, coffee, gardening, tea, pottery and mechanical keyboards normalize both retrieval and English-catalog matching. Chinese giver/negative markers preserve recipient constraints. Novel short product phrases are supported; this is not universal translation.
+- Model repair: no invalid argument batch dispatches; at most two static correction-feedback batches within six model turns and 16 real read calls. Unsupported tools and malformed envelopes remain fatal. No raw arguments, prompts or provider errors are exposed.
 - Safe model diagnostics expose only allowlisted error code/stage and fixed text, never prompts, provider bodies, stacks or credentials.
-- This v0.4 release is locally prepared. Repository upload, deployment, public gift-set flow and mobile visual QA remain to be verified.
+- This v0.5 release is locally prepared. Repository upload, deployment, public gift-set flow and mobile visual QA remain to be verified.
 
 ## Previously verified live behavior
 
@@ -21,6 +25,8 @@
 - Initial public deployment at https://the-gift-edit-seven.vercel.app/ completed real search, exact product refresh, gift brief/copy, exclusions/reset and low-budget results in the cloud browser.
 - User-uploaded commit 789faae8a6953def8756242a5ac19fe8e11563da at 20:01:44 UTC deployed successfully. Desktop hero layout correction and exclusion-chip behavior were verified publicly.
 - User configured Gateway access themselves and redeployed around 20:10 UTC. A bounded generic AI smoke run returned a safe failure. The user subsequently reported a connected run with greeting-card products. Successful model/tool output has not yet been independently reproduced; local agent tests use synthetic responses.
+- User uploaded v0.4 commit db75a560d907575692da4b836ad737cbf33cd390 at 20:38:55 UTC; all 26 changed files matched, and deployment succeeded at 20:39:14. Cloud-browser rules mode returned 10 real non-card listings under $100. One exact $18 variant was added locally, subtotal/remaining were correct, reducing budget to $10 blocked checkout, removal succeeded, and strict date screening showed no eligible unknown-delivery gifts. A second local add action did not receive tool approval and was not retried; two-item group flow remains mock-tested. No checkout was created.
+- The actual v0.4 $100 self-gift AI run returned AGENT_INVALID_RESPONSE at tool_arguments. The deployed diagnostic did not expose the exact subtype, so JSON/schema/ID cause remains unresolved. The local repair does not constitute a live-success claim.
 - Original artwork file hashes match the source pack. Hero artwork is separate inspiration, not a live Shop catalog or physical sample.
 
 ## Not performed / limits

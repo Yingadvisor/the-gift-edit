@@ -1,3 +1,4 @@
+import {validateAudienceContext} from '../src/audience-context.mjs';
 import {createHmac,randomBytes} from 'node:crypto';
 import {assertRequestHeaders,readBody} from './shop-api.mjs';
 import {runGiftAgent,GiftAgentError} from './gift-agent.mjs';
@@ -21,7 +22,9 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
       if(req.method==='GET')return send(200,{configured:Boolean(gatewayToken(req,env)),provider:'Vercel AI Gateway',model,modelConnected:false,disclosure:'Configuration presence is not a successful model connection. A user-requested model run must succeed first.'});
       assertRequestHeaders(req);
       const body=await readBody(req);
-      if(body.consent!==true||(body.selfGift!==undefined&&typeof body.selfGift!=='boolean')||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors','selfGift'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
+      if(body.consent!==true||(body.selfGift!==undefined&&typeof body.selfGift!=='boolean')||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors','selfGift','audience','ageBand','expression'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
+      try { validateAudienceContext({audience:body.audience,ageBand:body.ageBand},body.query??''); } catch { return send(400,{error:{code:'INVALID_REQUEST',message:'Choose only a supported audience and adult age band.'}}); }
+      if(body.expression!==undefined&&(typeof body.expression!=='string'||body.expression.length>400))return send(400,{error:{code:'INVALID_REQUEST',message:'Use an optional non-identifying expression of at most 400 characters.'}});
       const token=gatewayToken(req,env);
       if(!token)return send(503,{error:{code:'MODEL_NOT_CONFIGURED',message:'The model is not configured. No AI recommendation was generated. You can use rules-based search instead.'}});
       const at=now();for(const[k,v]of rates)if(v.expires<=at)rates.delete(k);
@@ -41,7 +44,9 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
       const stages=new Set(['model','tool_arguments','catalog_search','product_refresh','recommendation_validation']);
       if(error instanceof GiftAgentError&&coreCodes.has(error.code)){
         const stage=stages.has(error.stage)?error.stage:'input';
-        return send(Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:502,{error:{code:error.code,stage,message:`${new GiftAgentError(error.code).message} (${error.code}; stage: ${stage}) No checkout or payment was made.`}});
+        const argumentIssues=new Set(['invalid_envelope','duplicate_call_id','invalid_encoding','malformed_json','invalid_schema','unknown_fields','unobserved_product','unobserved_option']);
+        const argumentIssue=stage==='tool_arguments'&&argumentIssues.has(error.argumentIssue)?error.argumentIssue:null;
+        return send(Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:502,{error:{code:error.code,stage,...(argumentIssue?{argumentIssue}:{}),message:`${new GiftAgentError(error.code).message} (${error.code}; stage: ${stage}${argumentIssue?`; reason: ${argumentIssue}`:''}) No checkout or payment was made.`}});
       }
       const known=['INVALID_AGENT_INPUT','MODEL_NOT_CONFIGURED','AGENT_RATE_LIMIT','INVALID_REQUEST','INVALID_JSON','REQUEST_TOO_LARGE','ORIGIN_NOT_ALLOWED','METHOD_NOT_ALLOWED','UNSUPPORTED_MEDIA_TYPE'];
       const code=known.includes(error?.code)?error.code:'AGENT_UNAVAILABLE';

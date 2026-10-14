@@ -78,7 +78,7 @@ test('review: invalid resubmission cannot leave actionable stale recommendations
   const get = id => { if (!elements.has(id)) elements.set(id, new Node(id)); return elements.get(id); };
   const form = get('gift-form');
   form.values = {...profile(),query:'ocean gifts'};
-  const context = vm.createContext({
+  const context = vm.createContext({initCustomPanel:()=>({refresh(){}}),
     recommend, ENGINE, buildBrief, ...shop, URL,
     fetch: async () => ({ok:true,json:async()=>({products:[{id:'gid://shopify/p/mock',title:'Ocean ceramic mug',variants:[{id:'gid://shopify/ProductVariant/mock',price:{amount:2400,currency:'USD'},availability:{available:true},seller:{domain:'mock.myshopify.com'},options:[]}]}],messages:[]})}),
     document: { getElementById: get, createElement: tag => new Node(tag) },

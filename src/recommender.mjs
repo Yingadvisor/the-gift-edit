@@ -1,3 +1,4 @@
+import { normalizeInterestLanguage } from './interest-language.mjs';
 import { CATALOG, CATALOG_INFO } from './catalog.mjs';
 export const ENGINE = Object.freeze({ id: 'rules-v1', label: 'Rules-based demo', modelConnected: false, disclosure: 'No AI model is connected. Matches use explicit keyword rules and your stated recipient preferences.' });
 const GROUPS = {
@@ -37,9 +38,9 @@ export function validateProfile(input) {
 
 /** Rules deliberately prefer uncertainty over invented recipient interests. */
 export function extractEvidence(profile) {
-  const positive = [], negatives = [profile.dislikes];
+  const positive = [], negatives = [normalizeInterestLanguage(profile.dislikes)];
   const notices = [];
-  for (const fragment of profile.likes.replace(/[’]/g, "'").split(/[.!?;\n]+|\b(?:but|whereas|while)\b|\band(?=\s+(?:they|he|she|I|we|the recipient)\b)/i).filter(Boolean)) {
+  for (const fragment of normalizeInterestLanguage(profile.likes).replace(/[’]/g, "'").split(/[.!?;\n]+|\b(?:but|whereas|while)\b|\band(?=\s+(?:they|he|she|I|we|the recipient)\b)/i).filter(Boolean)) {
     // Giver interests must never silently become recipient preferences.
     if (profile.selfGift !== true && profile.relationship !== 'Myself' && /\b(i|me|we|our|my)\b/i.test(fragment)) {
       notices.push('A first-person statement was not treated as the recipient’s preference. Rewrite it as “They like …” if that is what you mean.');

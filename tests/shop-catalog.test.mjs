@@ -19,7 +19,7 @@ test('main gift ranking removes greeting cards for birthdays without removing ac
  const make=(title,n)=>product({id:`gid://shopify/Product/${n}`,title,description:'Ocean gift'});
  const result=rankShopProducts([make('Ocean greeting card',1),make('Ocean cardigan',2),make('Ocean card game',3),make('Ocean wallet card holder',4),make('Ocean gift wrapping paper',5)],{...profile,budget:100,occasion:'Birthday'});
  assert.deepEqual(result.recommendations.map(r=>r.product.title),['Ocean cardigan','Ocean card game','Ocean wallet card holder']);
- assert.ok(result.recommendations.every(r=>r.giftRole==='primary'));assert.equal(result.rejected.length,2);
+ assert.ok(result.recommendations.every(r=>r.giftRole==='primary'));assert.equal(result.addons.length,2);assert.ok(result.addons.every(r=>r.giftRole==='addon'));assert.equal(result.rejected.length,0);
 });
 test('main gift ranking honors explicit card searches and recipient interests, not occasion alone',()=>{
  const p=product({title:'Ocean greeting card'});
@@ -45,3 +45,8 @@ test('gift set helpers are re-exported for the UI catalog entrypoint',async()=>{
  const catalog=await import('../src/shop-catalog.mjs');const set=await import('../src/gift-set.mjs');
  for(const name of ['summarizeGiftSet','canAddToGiftSet','setItemKey'])assert.equal(catalog[name],set[name]);
 });
+
+
+test('explicit birthday card query remains eligible without invented interest overlap',()=>{const p=product({title:'Birthday greeting card',description:'A birthday card'});const r=rankShopProducts([p],{...profile,likes:'They like coffee.',query:'birthday greeting cards'});assert.equal(r.recommendations.length,1);assert.match(r.recommendations[0].reasons[0],/explicit search request/);});
+test('required Star Wars theme and male catalog evidence beat unrelated jewelry padding',()=>{const make=(title,n)=>product({id:`gid://shopify/Product/theme${n}`,title,description:title});const r=rankShopProducts([make("Women's Star Wars necklace",1),make("Men's Star Wars necklace",2),make("Men's plain necklace",3)],{...profile,likes:'They like coffee.',query:'Star Wars gifts for men',budget:100,audience:'men',ageBand:'30-44'});assert.deepEqual(r.recommendations.map(x=>x.product.title),["Men's Star Wars necklace"]);});
+test('optional cards cannot evade theme, budget or explicit exclusions',()=>{const p=product({title:'Ocean greeting card'});assert.equal(rankShopProducts([p],{...profile,query:'Star Wars gifts'}).addons.length,0);assert.equal(rankShopProducts([p],{...profile,budget:1}).addons.length,0);assert.equal(rankShopProducts([p],profile,{excludedIds:[p.id]}).addons.length,0);});

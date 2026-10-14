@@ -28,18 +28,21 @@ class Element {
   close(){this.open=false;this.listeners.close?.();}
 }
 const descendants=node=>[node,...node.children.flatMap(descendants)];
-async function harness(responder){
-  const roots=new Map();const calls=[];const requests=[];
+async function harness(responder,{realCustom=false}={}){
+  const roots=new Map();const calls=[];const requests=[];const custom={refreshes:0,options:null};let doc;
   const get=id=>{
     for(const root of roots.values()){const found=descendants(root).find(n=>n.id===id);if(found)return found;}
-    if(!roots.has(id)){const node=new Element(id);node.id=id;roots.set(id,node);}
+    if(!roots.has(id)){const node=new Element(id);node.id=id;node.ownerDocument=doc;roots.set(id,node);}
     return roots.get(id);
   };
+  doc={getElementById:get,createElement:tag=>{const node=new Element(tag);node.ownerDocument=doc;return node;}};
+  const customSource=realCustom?(await readFile(new URL('../public/custom-panel.mjs',import.meta.url),'utf8')).replace("'/modules/custom-concepts.mjs'",JSON.stringify(new URL('../src/custom-concepts.mjs',import.meta.url).href)):null;
+  const actualCustom=realCustom?(await import(`data:text/javascript;base64,${Buffer.from(customSource).toString('base64')}`)).initCustomPanel:null;
   get('gift-form').values={...profile};
   get('relationship').value=profile.relationship;
   get('recipient').value=profile.recipient;
-  const context=vm.createContext({...shop,reviewContent,URL,crypto:webcrypto,TextEncoder,Uint8Array,structuredClone,
-    document:{getElementById:get,createElement:tag=>new Element(tag)},
+  const context=vm.createContext({initCustomPanel:options=>{custom.options=options;return actualCustom?actualCustom(options):{refresh(){custom.refreshes++;}};},...shop,reviewContent,URL,crypto:webcrypto,TextEncoder,Uint8Array,structuredClone,
+    document:doc,
     window:{innerWidth:1000},navigator:{},
     FormData:class{constructor(form){return Object.entries(form.values);}},
     fetch:async(url,options)=>{const payload=JSON.parse(options.body);calls.push(payload);requests.push({url,payload});return responder(payload,calls.length);},
@@ -49,7 +52,7 @@ async function harness(responder){
   const run=source=>vm.runInContext(source,context);
   context.fixtureProfile={...profile};context.fixtureProduct=product();
   run('state.profile=fixtureProfile;state.active={rec:{product:fixtureProduct,variant:fixtureProduct.variants[0]},product:null,variant:null,selected:fixtureProduct.selected,requested:fixtureProduct.selected,profile:{...fixtureProfile},valid:false};');
-  return {get,run,calls,requests,context};
+  return {get,run,calls,requests,custom,context};
 }
 
 test('Shop UI review: pending checkout A cannot appear beneath refreshed variant B',async()=>{
@@ -83,7 +86,7 @@ test('Shop UI review: stale product refresh response cannot replace newer select
 test('Shop UI review: search sends query and budget, never recipient private profile',async()=>{
   const h=await harness(()=>response({products:[],messages:[]}));
   await h.run('search()');
-  assert.deepEqual(h.calls,[{action:'search',query:'ocean mug',budget:75}]);
+  assert.deepEqual(h.calls,[{action:'search',query:'ocean gifts',budget:75}]);
   assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|Birthday|silk|They love/);
 });
 
@@ -113,7 +116,7 @@ test('Agent UI review: explicit AI search sends only consented preference fields
   h.get('use-agent').checked=true;
   h.run("state.excludedFactors=['fragrance']");
   await h.run('search()');
-  assert.deepEqual(h.requests,[{url:'/api/agent',payload:{consent:true,likes:profile.likes,dislikes:profile.dislikes,occasion:profile.occasion,budget:profile.budget,query:profile.query,excludedFactors:['fragrance']}}]);
+  assert.deepEqual(h.requests,[{url:'/api/agent',payload:{consent:true,likes:profile.likes,dislikes:profile.dislikes,occasion:profile.occasion,budget:profile.budget,query:'ocean gifts',expression:'',excludedFactors:['fragrance']}}]);
   assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|Friend|recipient|relationship/);
 });
 
@@ -293,7 +296,7 @@ test('Arrival UI review: strict date yields no eligible gifts despite stock or u
   await h.run('search()');
   assert.equal(h.run('state.profile.arrivalDeadline'),'2026-10-20');assert.equal(h.run('state.result.recommendations.length'),0);
   assert.ok(descendants(h.get('results-content')).some(n=>/Can’t verify delivery by 2026-10-20/.test(n.textContent)));
-  assert.deepEqual(h.calls,[{action:'search',query:profile.query,budget:profile.budget}]);
+  assert.deepEqual(h.calls,[{action:'search',query:'ocean gifts',budget:profile.budget}]);
   assert.doesNotMatch(JSON.stringify(h.calls),/2026-10-20|arrival|destination|address|Private Name/);
 });
 
@@ -372,7 +375,7 @@ test('Self-gift UI review: self search accepts omitted disabled name and first-p
   const {recipient,...selfForm}=profile;h.get('gift-form').values={...selfForm,relationship:'Myself',likes:'I love ocean.'};
   await h.run('search()');assert.equal(h.get('form-errors').hidden,true);assert.equal(h.run('state.profile.recipient'),'You');assert.equal(h.run('state.profile.selfGift'),true);
   assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.get('results-title').textContent,'A thoughtful edit for you.');
-  assert.deepEqual(h.calls,[{action:'search',query:profile.query,budget:profile.budget}]);
+  assert.deepEqual(h.calls,[{action:'search',query:'ocean gifts',budget:profile.budget}]);
 });
 
 test('Self-gift UI review: AI sends only the selfGift flag, never name or relationship',async()=>{
@@ -391,5 +394,218 @@ test('Self-gift UI review: example button returns to Friend without restoring st
   h.get('try-example').listeners.click();await submission;
   assert.equal(h.get('relationship').value,'Friend');assert.equal(h.get('recipient').value,'Alex');assert.equal(h.get('recipient').disabled,false);
   assert.equal(h.get('likes-label').textContent,'What do they love?');assert.equal(h.run('state.profile.recipient'),'Alex');assert.equal(h.run('state.profile.selfGift'),false);
-  assert.equal(h.calls.length,1);assert.equal(h.requests[0].url,'/api/shop');
+  assert.deepEqual(h.calls.map(call=>call.query),['ocean walks gifts','collecting shells gifts','hosting gifts']);assert.ok(h.requests.every(request=>request.url==='/api/shop'));
+});
+
+test('Gift modes UI review: custom toggles right column locally without changing shared form',async()=>{
+  const h=await harness(()=>{throw new Error('Mode switching must not call providers');});
+  const before=structuredClone(h.get('gift-form').values);
+  h.run("setGiftMode('custom')");
+  assert.equal(h.get('ready-made-content').hidden,true);assert.equal(h.get('custom-workspace').hidden,false);assert.equal(h.get('custom-panel').hidden,true);assert.equal(h.get('custom-empty').hidden,false);
+  assert.equal(h.get('mode-custom')['aria-pressed'],'true');assert.equal(h.get('mode-ready')['aria-pressed'],'false');assert.equal(h.custom.refreshes,0);
+  assert.deepEqual(h.get('gift-form').values,before);assert.equal(h.calls.length,0);
+  assert.equal(h.custom.options.getProfile().recipient,undefined);
+});
+
+test('Gift modes UI review: submitting custom mode never invokes Shop or AI even when AI checkbox is checked',async()=>{
+  const h=await harness(()=>{throw new Error('Custom submission must stay local');});h.get('use-agent').checked=true;
+  h.run("setGiftMode('custom')");const count=h.custom.refreshes;
+  h.get('gift-form').listeners.submit({preventDefault(){}});await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(h.custom.refreshes>count);assert.equal(h.calls.length,0);assert.equal(h.run('state.agentResult'),null);assert.equal(h.custom.options.getProfile().recipient,profile.recipient);
+});
+
+test('Gift modes UI review: returning to ready mode retains existing product results and set',async()=>{
+  const h=await harness(()=>response({products:[product()],messages:[]}));await h.run('search()');await addFixture(h,setProduct('A',3000));
+  const result=h.run('state.result'),products=h.run('state.products'),set=h.run('state.setItems');const callCount=h.calls.length;
+  h.run("setGiftMode('custom');setGiftMode('ready')");
+  assert.equal(h.get('ready-made-content').hidden,false);assert.equal(h.get('custom-workspace').hidden,true);
+  assert.equal(h.run('state.result'),result);assert.equal(h.run('state.products'),products);assert.equal(h.run('state.setItems'),set);assert.equal(h.calls.length,callCount);
+});
+
+test('Audience UI review: AI receives only generic selected adult audience context, not identity',async()=>{
+  const h=await harness(()=>response({modelConnected:true,model:'openai/gpt-4.1-mini',products:[],recommendations:[],messages:[],toolTrace:[]}));
+  h.get('gift-form').values={...profile,audience:'men',ageBand:'30-44'};h.get('use-agent').checked=true;await h.run('search()');
+  assert.equal(h.calls.length,1);assert.equal(h.requests[0].url,'/api/agent');assert.equal(h.calls[0].audience,'men');assert.equal(h.calls[0].ageBand,'30-44');
+  assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|recipient|relationship|birthDate|birthdayDate|address/);
+});
+
+test('Audience UI review: rules search inherits Men from stated interests and retains adult constraints locally',async()=>{
+  const h=await harness(()=>response({products:[],messages:[]}));h.get('gift-form').values={...profile,likes:'They love ocean gifts for men.',ageBand:'45-64',audience:'any'};
+  await h.run('search()');assert.equal(h.run('state.profile.audience'),'men');assert.equal(h.run('state.profile.ageBand'),'45-64');
+  assert.match(h.calls[0].query,/men/i);assert.match(h.calls[0].query,/adult/);assert.deepEqual(Object.keys(h.calls[0]).sort(),['action','budget','query']);
+  assert.ok(!('audience' in h.calls[0]));assert.ok(!('ageBand' in h.calls[0]));
+});
+
+test('Audience UI review: relationship choices place Myself before Other',async()=>{
+  const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const relationship=html.match(/<select id="relationship"[\s\S]*?<\/select>/)[0];
+  assert.ok(relationship.indexOf('<option>Myself</option>')<relationship.indexOf('<option>Other</option>'));
+});
+
+test('Add-ons UI review: cards stay separate, become addable only after refresh, and share set budget',async()=>{
+  const card=product('Blue');card.id='gid://shopify/p/card';card.title='Ocean greeting card';card.variants[0].price.amount=400;
+  const h=await harness(payload=>payload.action==='product'?response({product:card,messages:[]}):response({products:[product(),card],messages:[]}));budget(h,100);h.get('gift-form').values={...profile,budget:100};
+  await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.addons.length'),1);
+  assert.ok(descendants(h.get('results-content')).some(n=>n.textContent==='Optional add-ons'));assert.ok(descendants(h.get('results-content')).some(n=>n.textContent==='OPTIONAL ADD-ON'));
+  await addFixture(h,setProduct('A',2400));await h.run('openProduct(state.result.addons[0],null)');
+  assert.equal(h.run('state.active.valid'),true);assert.equal(h.get('add-to-set').disabled,false);await h.run('addActiveToSet()');
+  assert.equal(h.run('state.setItems.length'),2);assert.equal(h.run('setSummary().subtotal'),2800);assert.ok(h.calls.some(c=>c.action==='product'&&c.productId===card.id));assert.ok(h.calls.every(c=>c.action==='search'||c.action==='product'));
+  const expensive={...card,id:'gid://shopify/p/expensive-card',variants:[{...card.variants[0],id:'gid://shopify/ProductVariant/expensive-card',price:{amount:8000,currency:'USD'}}]};
+  await addFixture(h,expensive);assert.equal(h.run('state.setItems.length'),2);
+});
+
+test('Theme UI review: required Star Wars search cannot render unrelated main gifts or add-ons',async()=>{
+  const themed=product('Blue');themed.id='gid://shopify/p/themed';themed.title='Star Wars ocean mug';
+  const unrelated=product();const card={...product('Green'),id:'gid://shopify/p/plain-card',title:'Ocean greeting card'};
+  const h=await harness(()=>response({products:[unrelated,themed,card],messages:[]}));h.get('gift-form').values={...profile,likes:'They love Star Wars and the ocean.'};
+  await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.recommendations[0].product.id'),themed.id);assert.equal(h.run('state.result.addons.length'),0);
+});
+
+test('Add-ons UI review: explicit greeting-card interest remains available through automatic search',async()=>{
+  const card=product();card.title='Handmade greeting card';card.description='Blank paper card';
+  const h=await harness(()=>response({products:[card],messages:[]}));h.get('gift-form').values={...profile,likes:'They enjoy gardening and greeting cards.'};
+  await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.addons.length'),0);
+});
+
+test('More options UI review: exact next cursor, submitted query and budget fetch new eligible choices without changing the set',async()=>{
+  const first=setProduct('First'),next=setProduct('Next');
+  const h=await harness((payload,count)=>response(count===1?{products:[first],nextCursor:'opaque:first+/=',messages:[]}:{products:[next],nextCursor:null,messages:[]}));
+  await h.run('search()');await addFixture(h,first);const chosen=h.run('state.setItems');const subtotal=h.run('setSummary().subtotal');
+  await h.run('loadMoreOptions()');
+  assert.deepEqual(h.calls[1],{action:'search',query:h.calls[0].query,budget:profile.budget,cursor:'opaque:first+/='});
+  assert.equal(h.run('state.result.recommendations.length'),2);assert.ok(h.run('state.result.recommendations.some(rec=>rec.product.id.endsWith("Next"))'));
+  assert.equal(h.run('state.setItems'),chosen);assert.equal(h.run('setSummary().subtotal'),subtotal);assert.equal(h.run('setSummary().valid'),true);assert.equal(h.get('show-more').disabled,true);
+  assert.ok(h.calls.every(call=>call.action==='search'));
+});
+
+test('More options UI review: duplicate product and variant IDs do not repeat cards and ineligible additions stay hidden',async()=>{
+  const first=setProduct('First'),next=setProduct('Next');const duplicateVariant={...first,id:'gid://shopify/p/alternate-id'};
+  const silk=setProduct('Silk',2000,undefined,'Silk ocean gift'),expensive=setProduct('Expensive',10000),unavailable=setProduct('Unavailable');unavailable.variants[0].availability.available=false;
+  const h=await harness((payload,count)=>response(count===1?{products:[first],nextCursor:'page2',messages:[]}:{products:[first,duplicateVariant,next,next,silk,expensive,unavailable],messages:[]}));
+  await h.run('search()');await h.run('loadMoreOptions()');
+  assert.equal(h.run('state.result.recommendations.length'),2);
+  assert.deepEqual(Array.from(h.run('state.result.recommendations.map(rec=>rec.product.id)')).sort(),[first.id,next.id].sort());
+});
+
+test('More options UI review: pending page cannot pollute a newer submitted search',async()=>{
+  const pending=deferred(),old=setProduct('Old'),fresh=setProduct('Fresh');
+  const h=await harness((payload,count)=>count===2?pending.promise:response({products:[count===1?old:fresh],nextCursor:count===1?'old-page':null,messages:[]}));
+  await h.run('search()');const more=h.run('loadMoreOptions()');await h.run('search()');
+  pending.resolve(response({products:[setProduct('Stale')],nextCursor:'stale-next',messages:[{type:'warning',content:'Stale merchant warning'}]}));await more;
+  assert.deepEqual(Array.from(h.run('state.products.map(p=>p.id)')),[fresh.id]);assert.equal(h.run('state.nextCursor'),null);assert.equal(h.run('state.morePageCount'),0);assert.equal(h.run('state.moreBusy'),false);
+  assert.ok(!descendants(h.get('results-content')).some(n=>n.textContent==='Stale merchant warning'));
+});
+
+test('More options UI review: pending page respects changed typed constraints and reduced budget',async()=>{
+  for(const change of ['likes','budget']){
+    const pending=deferred();const h=await harness((payload,count)=>count===1?response({products:[setProduct('First')],nextCursor:'p2',messages:[]}):pending.promise);
+    await h.run('search()');const more=h.run('loadMoreOptions()');
+    if(change==='likes'){h.get('gift-form').values.likes='They love gardens.';h.get('gift-form').listeners.input({target:{id:'likes'}});}
+    else{h.get('budget').value='10';h.get('budget').listeners.input();}
+    pending.resolve(response({products:[setProduct('Stale')],nextCursor:'p3',messages:[]}));await more;
+    assert.equal(h.run('state.products.length'),1);assert.equal(h.run('state.morePageCount'),0);assert.equal(h.get('show-more').disabled,true);
+    const calls=h.calls.length;await h.run('loadMoreOptions()');assert.equal(h.calls.length,calls);
+  }
+});
+
+test('More options UI review: strict arrival deadline blocks extra requests and cannot gain new eligible results',async()=>{
+  const h=await harness(()=>response({products:[setProduct('First')],nextCursor:'p2',messages:[]}));
+  h.get('gift-form').values={...profile,mustArrive:'on',arrivalDeadline:'2099-12-31'};await h.run('search()');await h.run('loadMoreOptions()');
+  assert.equal(h.calls.length,1);assert.equal(h.run('state.result.recommendations.length'),0);assert.equal(h.get('show-more').disabled,true);assert.doesNotMatch(JSON.stringify(h.calls),/2099|arrival|destination/);
+});
+
+test('More options UI review: only one concurrent request and at most three additional pages are allowed',async()=>{
+  const pending=deferred();const h=await harness((payload,count)=>count===2?pending.promise:response({products:[setProduct(`Page${count}`)],nextCursor:`cursor${count}`,messages:[]}));
+  await h.run('search()');const one=h.run('loadMoreOptions()');await h.run('loadMoreOptions()');assert.equal(h.calls.length,2);
+  pending.resolve(response({products:[setProduct('Page2')],nextCursor:'cursor2',messages:[]}));await one;
+  await h.run('loadMoreOptions()');await h.run('loadMoreOptions()');await h.run('loadMoreOptions()');
+  assert.equal(h.calls.length,4);assert.equal(h.run('state.morePageCount'),3);assert.equal(h.get('show-more').disabled,true);
+  assert.deepEqual(h.calls.slice(1).map(call=>call.cursor),['cursor1','cursor2','cursor3']);
+});
+
+test('More options UI review: additional AI-mode pages are visibly rules-only and keep the original model selection',async()=>{
+  const chosen=setProduct('Chosen'),extra=setProduct('Extra');
+  const h=await harness((payload,count)=>count===1?response({modelConnected:true,model:'openai/gpt-4.1-mini',products:[chosen],recommendations:[{productId:chosen.id,variantId:chosen.variants[0].id,reason:'Chosen from live facts.'}],messages:[],toolTrace:[]}):response({products:[chosen,extra],nextCursor:'next',messages:[]}));
+  h.get('use-agent').checked=true;await h.run('search()');await h.run('loadMoreOptions()');
+  assert.equal(h.requests[0].url,'/api/agent');assert.equal(h.requests[1].url,'/api/shop');assert.deepEqual(Object.keys(h.calls[1]).sort(),['action','budget','query']);
+  assert.equal(h.run('state.result.recommendations.length'),1);assert.equal(h.run('state.result.recommendations[0].product.id'),chosen.id);assert.equal(h.run('state.moreProducts.length'),1);
+  assert.ok(descendants(h.get('results-content')).some(n=>String(n.textContent).includes('not additional model-selected recommendations')));
+  assert.ok(descendants(h.get('results-content')).some(n=>n.textContent===extra.title));
+  const extraCard=descendants(h.get('results-content')).find(n=>n.tagName==='article'&&descendants(n).some(child=>child.textContent===extra.title));
+  descendants(extraCard).find(n=>n.textContent==='Gift brief').listeners.click();
+  assert.match(h.get('brief-text').value,/Ranking is rules-based, not an LLM recommendation/);assert.doesNotMatch(h.get('brief-text').value,/AI-guided selection via/);
+});
+
+test('Expression UI review: optional meaning appears first and Find gifts replaces the exposed technical query',async()=>{
+  const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');const form=html.match(/<form id="gift-form"[\s\S]*?<\/form>/)[0];
+  assert.ok(form.indexOf('id="expression"')<form.indexOf('id="recipient"'));assert.doesNotMatch(form,/id="query"|name="query"/);
+  const expression=form.match(/<input[^>]*id="expression"[^>]*>/)[0];assert.doesNotMatch(expression,/required/);assert.match(form,/>Find gifts /);
+});
+
+test('Expression UI review: real custom module survives empty-state entry and changes only on submission',async()=>{
+  const h=await harness(()=>{throw new Error('Custom ideas must not call a provider');},{realCustom:true});
+  h.run("setGiftMode('custom')");assert.equal(h.get('custom-empty').hidden,false);assert.equal(h.get('custom-panel').hidden,true);
+  h.get('gift-form').values={...profile,expression:'Protection and care'};h.get('gift-form').listeners.submit({preventDefault(){}});
+  assert.equal(h.get('custom-empty').hidden,true);assert.equal(h.get('custom-panel').hidden,false);
+  const panel=h.get('custom-panel');assert.ok(descendants(panel).some(n=>n['aria-label']==='Choose an original motif'));
+  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: Protection and care.')));
+  h.get('gift-form').values.expression='New beginnings';h.get('gift-form').listeners.input({target:{id:'expression'}});
+  descendants(panel).find(n=>n['aria-label']==='Ocean Reverie, shown on pillow').listeners.click();
+  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: Protection and care.')));
+  assert.ok(!descendants(panel).some(n=>String(n.textContent).includes('Expressing: New beginnings.')));
+  descendants(panel).find(n=>n.textContent==='View design brief').listeners.click();assert.match(h.get('brief-text').value,/Protection and care/);assert.doesNotMatch(h.get('brief-text').value,/New beginnings/);
+  h.get('gift-form').listeners.submit({preventDefault(){}});
+  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: New beginnings.')));assert.equal(h.calls.length,0);
+});
+
+test('Expression UI review: ready-to-custom switches reuse the submitted snapshot, not unsubmitted edits',async()=>{
+  const h=await harness(()=>response({products:[product()],messages:[]}),{realCustom:true});h.get('gift-form').values={...profile,expression:'Enduring companionship'};await h.run('search()');
+  h.get('gift-form').values.expression='Courage';h.get('gift-form').values.recipient='UNSUBMITTED NAME';h.get('gift-form').listeners.input({target:{id:'expression'}});
+  const results=h.run('state.result');h.run("setGiftMode('custom')");
+  assert.equal(h.custom.options.getProfile().expression,'Enduring companionship');assert.equal(h.custom.options.getProfile().recipient,profile.recipient);
+  assert.ok(descendants(h.get('custom-panel')).some(n=>String(n.textContent).startsWith('Expressing: Enduring companionship.')));
+  h.run("setGiftMode('ready')");assert.equal(h.calls.length,1);assert.equal(h.run('state.result'),results);assert.equal(h.run('state.preferencesDirty'),true);
+  assert.equal(h.get('gift-form').values.expression,'Courage');assert.equal(h.get('gift-form').values.recipient,'UNSUBMITTED NAME');
+});
+
+test('Expression UI review: custom-to-ready retrieval uses the submitted snapshot and retains dirty-checkout guard',async()=>{
+  const h=await harness(()=>response({products:[product()],messages:[]}));h.get('gift-form').values={...profile,expression:'Gratitude'};h.run("setGiftMode('custom');submitCustom()");
+  h.get('gift-form').values.likes='They love gardening.';h.get('gift-form').values.dislikes='ocean';h.get('gift-form').listeners.input({target:{id:'dislikes'}});
+  h.run("setGiftMode('ready')");await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.calls.length,1);assert.equal(h.calls[0].query,'ocean gifts');assert.equal(h.run('state.profile.likes'),profile.likes);assert.equal(h.run('state.preferencesDirty'),true);
+  await h.run('createCheckout()');assert.equal(h.calls.length,1);
+});
+
+test('Expression UI review: rules ignore legacy query and raw meaning, while explicit AI consent sends the meaning only in its declared field',async()=>{
+  const secret='A private personal expression, not catalog words';
+  const rules=await harness(()=>response({products:[],messages:[]}));rules.get('gift-form').values={...profile,query:'PRIVATE LEGACY QUERY',expression:secret};await rules.run('search()');
+  assert.deepEqual(rules.calls,[{action:'search',query:'ocean gifts',budget:75}]);assert.doesNotMatch(JSON.stringify(rules.calls),/private|Private|LEGACY/);
+  const ai=await harness(()=>response({modelConnected:true,model:'openai/gpt-4.1-mini',products:[],recommendations:[],messages:[],toolTrace:[]}));ai.get('gift-form').values={...profile,query:'PRIVATE LEGACY QUERY',expression:secret};ai.get('use-agent').checked=true;await ai.run('search()');
+  assert.equal(ai.calls[0].expression,secret);assert.equal(ai.calls[0].query,'ocean gifts');assert.doesNotMatch(JSON.stringify(ai.calls),/Private Name|LEGACY|recipient|relationship/);
+});
+
+test('Expression UI review: a custom submission prevents an older ready-made response from replacing its snapshot',async()=>{
+  const pending=deferred();const h=await harness(()=>pending.promise);const old=h.run('search()');
+  h.get('gift-form').values={...profile,expression:'New beginnings'};h.run("setGiftMode('custom');submitCustom()");
+  pending.resolve(response({products:[setProduct('Stale')],nextCursor:'stale',messages:[]}));await old;
+  assert.equal(h.run('state.submittedProfile.expression'),'New beginnings');assert.equal(h.run('state.products.length'),0);assert.equal(h.run('state.agentResult'),null);assert.equal(h.run('state.readySearched'),false);
+});
+
+test('Search plan UI review: mixed interests use focused parallel queries, merge unique listings, and page the exact first query',async()=>{
+  const ocean=setProduct('Ocean'),garden=setProduct('Garden'),extra=setProduct('MoreOcean');garden.title='Gardening kit';garden.description='Botanical tools for gardening.';
+  const h=await harness(payload=>response(payload.cursor?{products:[extra],messages:[]}:{products:payload.query==='ocean walks gifts'?[ocean]:[garden,ocean],nextCursor:payload.query==='ocean walks gifts'?'ocean-cursor':'garden-cursor',messages:[]}));
+  h.get('gift-form').values={...profile,likes:'They enjoy ocean walks and gardening.'};await h.run('search()');
+  assert.deepEqual(h.calls,[{action:'search',query:'ocean walks gifts',budget:75},{action:'search',query:'gardening gifts',budget:75}]);
+  assert.equal(h.run('state.result.recommendations.length'),2);assert.equal(h.run('state.products.length'),2);
+  assert.ok(h.run('state.result.recommendations.some(rec=>rec.product.title==="Gardening kit")'));
+  await addFixture(h,ocean);const set=h.run('state.setItems');await h.run('loadMoreOptions()');
+  assert.deepEqual(h.calls[2],{action:'search',query:'ocean walks gifts',budget:75,cursor:'ocean-cursor'});assert.equal(h.run('state.result.recommendations.length'),3);assert.equal(h.run('state.setItems'),set);
+});
+
+test('Search plan UI review: exact named-theme retrieval is not narrowed by unrelated interests or demographic suffixes',async()=>{
+  const themed=product();themed.title='Star Wars mug';
+  const h=await harness(()=>response({products:[themed],nextCursor:'theme-page',messages:[]}));
+  h.get('gift-form').values={...profile,likes:'They love Star Wars, coffee and gardening.',audience:'men',ageBand:'30-44'};await h.run('search()');await h.run('loadMoreOptions()');
+  assert.deepEqual(h.calls,[{action:'search',query:'Star Wars',budget:75},{action:'search',query:'Star Wars',budget:75,cursor:'theme-page'}]);
+  assert.equal(h.run('state.profile.audience'),'men');assert.equal(h.run('state.profile.ageBand'),'30-44');assert.equal(h.run('state.result.recommendations.length'),1);
 });

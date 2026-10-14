@@ -85,3 +85,17 @@ test('Agent route review: only a boolean selfGift context crosses the route, nev
  for(const selfGift of ['true',1,null,{}])assert.equal((await invoke(handler,{...input(),selfGift})).status,400);
  assert.equal(seen.length,1);
 });
+
+
+test('Agent diagnostic: only allowlisted argument reasons can leave the route',async()=>{
+ for(const [argumentIssue,expected] of [['unobserved_product','unobserved_product'],['malformed_json','malformed_json'],['SYNTHETIC_TEST_TOKEN private prompt',undefined]]){
+  const handler=createAgentHandler({env:configured,runAgent:async()=>{const e=new GiftAgentError('AGENT_INVALID_RESPONSE');e.stage='tool_arguments';e.argumentIssue=argumentIssue;throw e;}});const r=await invoke(handler);assert.equal(r.body.error.argumentIssue,expected);assert.doesNotMatch(r.text,/SYNTHETIC_TEST_TOKEN|private prompt/);
+ }
+});
+
+test('Agent route review: generic adult context is allowed but identity and invalid audience remain blocked',async()=>{
+ let seen;const handler=createAgentHandler({env:configured,runAgent:async input=>{seen=input;return {recommendations:[]};}});
+ assert.equal((await invoke(handler,{...input(),audience:'men',ageBand:'30-44'})).status,200);
+ assert.equal(seen.audience,'men');assert.equal(seen.ageBand,'30-44');assert.equal(Object.hasOwn(seen,'recipient'),false);
+ for(const delta of [{audience:'boys'},{ageBand:'under18'},{age:35},{gender:'male'},{audience:{name:'private'}}])assert.equal((await invoke(handler,{...input(),...delta})).status,400);
+});

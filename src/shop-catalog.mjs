@@ -1,3 +1,8 @@
+import {buildGiftSearchQuery,buildGiftSearchPlan} from './gift-search.mjs';
+export {buildGiftSearchQuery,buildGiftSearchPlan};
+import {validateAudienceContext,audienceSearchQuery,assessAudience} from './audience-context.mjs';
+import {assessTheme} from './gift-theme.mjs';
+export {audienceSearchQuery,assessAudience};
 import {assessArrival,validArrivalDate} from './delivery-deadline.mjs';
 export {assessArrival,validArrivalDate};
 import {assessGiftRole, primaryGiftValueScore} from './gift-quality.mjs';
@@ -12,7 +17,7 @@ export function safeHttpsUrl(value){
   try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.hostname==='localhost'||/^\d+(\.\d+){3}$/.test(u.hostname)||u.hostname.includes(':'))return null;return value;}catch{return null;}
 }
 export function formatMoney(price){if(!Number.isSafeInteger(price?.amount)||typeof price?.currency!=='string')return 'Price unavailable';try{const f=new Intl.NumberFormat('en-US',{style:'currency',currency:price.currency});return f.format(price.amount/10**f.resolvedOptions().maximumFractionDigits)+' '+price.currency;}catch{return 'Price unavailable';}}
-export function validateShopProfile(input){const selfGift=input?.relationship==='Myself';const r=validateProfile(selfGift?{...input,recipient:'You'}:input);const query=String(input?.query??'').trim();if(!query||query.length>240)r.errors.push('Add a product search query, up to 240 characters.');const arrivalDeadline=input?.mustArrive===true||input?.mustArrive==='on'?String(input?.arrivalDeadline??''):null;if(arrivalDeadline!==null&&!validArrivalDate(arrivalDeadline))r.errors.push('Choose a valid must-arrive-by date.');return {...r,valid:!r.errors.length,profile:{...r.profile,query,arrivalDeadline,selfGift}};}
+export function validateShopProfile(input){const selfGift=input?.relationship==='Myself';const r=validateProfile(selfGift?{...input,recipient:'You'}:input);const query=String(input?.query??'').trim();if(!query||query.length>240)r.errors.push('Add recipient interests so we can find a gift.');const expression=String(input?.expression??'').trim();if(expression.length>400)r.errors.push('Keep the intended expression under 400 characters.');const arrivalDeadline=input?.mustArrive===true||input?.mustArrive==='on'?String(input?.arrivalDeadline??''):null;if(arrivalDeadline!==null&&!validArrivalDate(arrivalDeadline))r.errors.push('Choose a valid must-arrive-by date.');let context={audience:'any',ageBand:'any'};try{context=validateAudienceContext({audience:input?.audience,ageBand:input?.ageBand},query);}catch{r.errors.push('Choose supported optional adult age and audience values.');}return {...r,valid:!r.errors.length,profile:{...r.profile,query,expression,arrivalDeadline,selfGift,audience:context.audience,ageBand:context.ageBand,audienceNotice:context.notice}};}
 const normal=s=>String(s??'').toLowerCase().replace(/[’]/g,"'").replace(/<[^>]*>/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 const STOP=new Set('a an the they their them he she her his is are was were loves love likes like enjoys enjoy with and or for of to in at from my your recipient someone person friend friends very really about things that this it its have has who whom than much something anything'.split(' '));
 const stem=s=>s.length>4&&s.endsWith('ing')?s.slice(0,-3):s.length>3&&s.endsWith('s')?s.slice(0,-1):s;
@@ -35,12 +40,12 @@ export function selectedMatches(requested,product,variant){
   const same=(a,b)=>a.length===b.length&&a.every(x=>b.some(y=>y.name===x.name&&y.label===x.label));
   return same(requested,Array.isArray(product?.selected)?product.selected:[])&&same(requested,Array.isArray(variant?.options)?variant.options:[]);
 }
-export function rankShopProducts(products,profile,{excludedIds=[],excludedCategories=[],excludedFactors=[],requireInterestEvidence=true}={}){
+export function rankShopProducts(products,profile,{excludedIds=[],excludedCategories=[],excludedFactors=[],requireInterestEvidence=true,limit=10}={}){
   const evidence=extractEvidence(profile);
   const positiveTokens=tokens(evidence.positiveText);
   const positive=expanded(positiveTokens);
   const negative=expanded(tokens(evidence.negativeText).filter(w=>!['not','never','avoid','dislike','dislikes','hate','hates','doesn','don','isn','aren','neither','nor','except'].includes(w)));
-  const rejected=[];const ranked=[];const seenIds=new Set();
+  const rejected=[];const ranked=[];const addons=[];const seenIds=new Set();
   for(const [index,product] of (Array.isArray(products)?products:[]).entries()){
     if(!product||typeof product.id!=='string'||typeof product.title!=='string'||seenIds.has(product.id))continue;
     seenIds.add(product.id);
@@ -53,7 +58,8 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
     if(variant.price.amount>Math.round(profile.budget*100)){reject('Item price exceeds budget');continue;}
     if(variant.availability?.available!==true){reject('Featured variant is not confirmed available');continue;}
     const giftRole=assessGiftRole(product,variant,{...profile,likes:evidence.positiveText});
-    if(giftRole.role==='addon'){reject(giftRole.reason);continue;}
+    const audience=assessAudience(product,variant,{audience:profile.audience,ageBand:profile.ageBand},profile.query||'');if(!audience.eligible){reject(audience.reason);continue;}
+    const theme=assessTheme(product,variant,profile.query||'');if(!theme.eligible){reject(theme.reason);continue;}
     const factors=assessExclusions(product,variant,excludedFactors);
     if(factors.matches.length){reject(`Excluded factor: ${factors.matches.map(x=>x.label).join(', ')}`);continue;}
     const description=value=>typeof value==='string'?value:(typeof value?.plain==='string'?value.plain:'');
@@ -63,23 +69,24 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
     const bad=[...negative].filter(w=>words.has(w));if(bad.length){reject(`Conflicts with stated avoidances: ${bad.slice(0,3).join(', ')}`);continue;}
     const hits=positiveTokens.filter(word=>[...expanded([word])].some(w=>words.has(w)));
     // Retain only evidence-linked matches; query relevance alone never invents recipient taste.
-    if(requireInterestEvidence&&!hits.length){reject('No explicit recipient-interest overlap in the returned details');continue;}
+    const directRequest=theme.requiredPhrases.length>0||giftRole.reason.includes('explicitly request');
+    if(requireInterestEvidence&&!hits.length&&giftRole.role!=='addon'&&!directRequest){reject('No explicit recipient-interest overlap in the returned details');continue;}
     const titleWords=expanded(tokens(product.title));const score=hits.length+hits.filter(word=>[...expanded([word])].some(w=>titleWords.has(w))).length;
-    ranked.push({product,variant,category,index,score,giftRole:giftRole.role,giftRoleReason:giftRole.reason,valueScore:primaryGiftValueScore(variant.price.amount,profile.budget),factorUnknowns:factors.unknown,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
+    (giftRole.role==='addon'?addons:ranked).push({product,variant,category,index,score,audienceUnknown:audience.status==='unknown'?audience.reason:null,giftRole:giftRole.role,giftRoleReason:giftRole.reason,valueScore:primaryGiftValueScore(variant.price.amount,profile.budget),factorUnknowns:factors.unknown,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[giftRole.role==='addon'?'Optional add-on from the current catalog search, not a primary gift.':!hits.length&&directRequest?'The merchant listing supports your explicit search request; this does not infer an additional recipient interest.':`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
   }
   // Interest evidence remains the strongest signal. Value and category variety are
   // soft tie-breakers, never minimum-spend or minimum-count requirements.
   const recommendations=[];const categoryCounts=new Map();
   const rankScore=item=>item.score+item.valueScore-0.75*(categoryCounts.get(item.category?.id)??0);
-  while(ranked.length&&recommendations.length<10){
+  while(ranked.length&&recommendations.length<Math.max(1,Math.min(40,Number.isInteger(limit)?limit:10))){
     ranked.sort((a,b)=>rankScore(b)-rankScore(a)||b.score-a.score||a.index-b.index);
     const next=ranked.shift();recommendations.push(next);
     if(next.category?.id)categoryCounts.set(next.category.id,(categoryCounts.get(next.category.id)??0)+1);
   }
-  return {recommendations,rejected,notices:evidence.notices,engine:SHOP_ENGINE};
+  return {recommendations,addons:addons.slice(0,6),rejected,notices:[...evidence.notices,...(profile.audienceNotice?[profile.audienceNotice]:[])],engine:SHOP_ENGINE};
 }
 export function shopBrief(profile,rec,{excludedFactors=[]}={}){return [
-  'GIFT BRIEF · THE GIFT EDIT',`Recipient: ${profile.recipient}`,`Relationship: ${profile.relationship||'Not specified'}`,`Occasion: ${profile.occasion||'Just because'}`,`Recipient likes: ${profile.likes}`,`Avoid: ${profile.dislikes||'None stated'}`,`Item-price budget: ${profile.budget} USD (tax and shipping extra)`,
+  'GIFT BRIEF · THE GIFT EDIT',`Recipient: ${profile.recipient}`,`Relationship: ${profile.relationship||'Not specified'}`,`Occasion: ${profile.occasion||'Just because'}`,`What to express: ${profile.expression||'Not specified'}`,`Adult age band: ${profile.ageBand||'any'}`,`Intended audience: ${profile.audience||'any'}`,`Recipient likes: ${profile.likes}`,`Avoid: ${profile.dislikes||'None stated'}`,`Item-price budget: ${profile.budget} USD (tax and shipping extra)`,
   `Must arrive by: ${profile.arrivalDeadline||'Not specified'} (not verified by this catalog; no delivery promise)`,`Quick exclusions: ${EXCLUSION_FACTORS.filter(x=>excludedFactors.includes(x.id)).map(x=>x.label).join(', ')||'None selected'}`,`Cannot verify from returned details: ${(rec.factorUnknowns??[]).map(x=>x.label).join(', ')||'No selected factor flagged as unknown; not a merchant guarantee'}`,
   `Shop product: ${rec.product.title}`,`Merchant: ${rec.variant.seller.name||rec.variant.seller.domain}`,`Current featured price: ${formatMoney(rec.variant.price)}`,`Product link: ${rec.url||'Unavailable'}`,
   'Catalog prices and stock can change. Refresh the exact variant before checkout. The buyer reviews final terms, shipping and taxes and pays on the merchant page.',

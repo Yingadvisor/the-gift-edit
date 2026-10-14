@@ -36,3 +36,11 @@
 - Around 20:27 UTC, added a strict local arrival-date exclusion after user feedback. Official Shop catalog documentation supplies no supported destination-specific arrival ETA. Unknown dates fail closed; merchant policy retrieval remains incomplete and no delivery promise is made.
 
 - Around 20:32 UTC, added an explicit Myself self-gifting choice. Only a boolean self-gifting context is shared in AI mode; no recipient name or full relationship field is sent.
+
+## v0.5 usability and model repair
+
+- Around 20:41–20:54 UTC, after the v0.4 public model test rejected a tool-argument batch, added bounded model repair and allowlisted diagnostic subtypes without loosening observed-ID/option checks.
+- User requested in-place Ready-made/Custom-made switching, optional approximate adult age and intended audience, stronger explicit-theme relevance, optional cards and Myself immediately before final Other. Implemented locally using original existing renders only; no franchise art was created and no original Atelier source/deployment was changed.
+- Release tests remain synthetic for model and checkout behavior. A successful live model/tool run must still be observed after deployment.
+
+- Around 20:57–21:03 UTC, simplified the input to optional expression followed by one submission, retained submitted context across the right-column modes, added actual bounded Shop cursor pagination, and prioritized exact named-theme retrieval over supplementary context. Rules mode now uses up to three focused generic-interest queries. These changes are locally tested, not yet publicly verified.
