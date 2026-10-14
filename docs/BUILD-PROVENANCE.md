@@ -7,7 +7,7 @@
 - No existing Expression Atelier source, Git history, deployment or storefront was modified.
 - Event eligibility for code or assets prepared before the official start has NOT been verified. This project makes no eligibility claim. Disclose this record to organizers before submission. Do not alter timestamps or present pre-existing assets as event-created work.
 - Initial scaffold was prepared before the user supplied a repository; no repository was created by the assistant. The user later supplied the new repository listed below.
-- No model or paid provider API was called. The included recommender is deterministic, rules-based software, not a completed AI agent.
+- The initial 16:26 scaffold made no model or paid-provider calls and used deterministic ranking. Later model integration and live checks are dated below.
 - All original render hashes and their source package identity are recorded in asset-provenance.json.
 
 ## Shop MCP pivot
@@ -25,3 +25,14 @@
 - The model loop is application code, not evidence of working credits or live inference. All model tests use synthetic responses until a bounded live run is separately verified.
 - No model credentials were created, entered, saved or exposed by implementation work. Existing server credential/OIDC consumption is optional.
 - Two branch-update attempts for the earlier layout-only commit were canceled; readback showed main unchanged. The consolidated agent/chips/layout release is prepared separately, not a bypass of either canceled write.
+
+## Deployed agent and gift-set upgrade
+
+- User manually uploaded consolidated source as commit 789faae8a6953def8756242a5ac19fe8e11563da at 2026-10-14T20:01:44Z. Desktop layout, real Shop reads and quick exclusions were verified on the deployed app.
+- User configured Gateway credentials themselves and redeployed around 20:10 UTC. One bounded generic model smoke attempt failed with a safe generic response; the user subsequently reported connected AI results. Successful model reasoning/tool flow has not yet been independently reproduced. No credentials were read, printed or uploaded by implementation work.
+- Gift-set and recommendation-quality implementation began around 20:17 UTC following user feedback about greeting-card-only results. This upgrade adds meaningful primary-gift selection, up to 10 choices, multi-select USD subtotal and separate merchant group checkouts, plus clear ready-made/custom-made paths. All checkout tests remain synthetic; no real checkout, order or charge was created.
+- This source release is prepared locally for the user-applied upload route. Earlier canceled ref writes were not retried or bypassed.
+
+- Around 20:27 UTC, added a strict local arrival-date exclusion after user feedback. Official Shop catalog documentation supplies no supported destination-specific arrival ETA. Unknown dates fail closed; merchant policy retrieval remains incomplete and no delivery promise is made.
+
+- Around 20:32 UTC, added an explicit Myself self-gifting choice. Only a boolean self-gifting context is shared in AI mode; no recipient name or full relationship field is sent.

@@ -45,14 +45,14 @@ test('checkout, arbitrary tools and injected instructions cannot trigger writes'
 test('current budget, availability and currency fail closed after refresh', async () => {
   for (const change of [{price: {amount: 5001, currency: 'USD'}}, {price: {amount: 2400, currency: 'EUR'}}, {price: {amount: 1.5, currency: 'USD'}}, {availability: {available: false}}]) {
     const p = product(); Object.assign(p.variants[0], change);
-    await rejectsCode(() => runGiftAgent(profile, harness(undefined, p).options), 'AGENT_INVALID_RESPONSE');
+    assert.equal((await runGiftAgent(profile, harness(undefined, p).options)).recommendations.length,0);
   }
 });
 test('explicit dislikes, negative likes and factor chips remain hard constraints', async () => {
-  for (const dislikes of ['mugs', 'ceramic']) await rejectsCode(() => runGiftAgent({...profile, dislikes}, harness().options), 'AGENT_INVALID_RESPONSE');
-  await rejectsCode(() => runGiftAgent({...profile, likes: 'They like ocean but not mugs.'}, harness().options), 'AGENT_INVALID_RESPONSE');
+  for (const dislikes of ['mugs', 'ceramic']) assert.equal((await runGiftAgent({...profile, dislikes}, harness().options)).recommendations.length,0);
+  assert.equal((await runGiftAgent({...profile, likes:'They like ocean but not mugs.'},harness().options)).recommendations.length,0);
   const p = product(); p.title = 'Ocean scented candle';
-  await rejectsCode(() => runGiftAgent({...profile, excludedFactors: ['fragrance']}, harness(undefined, p).options), 'AGENT_INVALID_RESPONSE');
+  assert.equal((await runGiftAgent({...profile, excludedFactors:['fragrance']},harness(undefined,p).options)).recommendations.length,0);
   const ok = await runGiftAgent({...profile, excludedFactors: ['fragrance']}, harness().options);
   assert.equal(ok.recommendations[0].factorUnknowns[0].id, 'fragrance');
 });
@@ -70,7 +70,7 @@ test('tool loops and time are bounded', async () => {
   const h = harness(Array.from({length: 8}, (_, n) => tool('search_catalog', {query: 'gifts'}, n)));
   await rejectsCode(() => runGiftAgent(profile, h.options), 'AGENT_LIMIT'); assert.equal(h.modelCalls.length, 6);
   await rejectsCode(() => runGiftAgent(profile, {callModel: () => new Promise(() => {}), timeoutMs: 10}), 'AGENT_TIMEOUT');
-  const batch = search(); batch.tool_calls = Array.from({length: 9}, (_, n) => tool('search_catalog', {query: 'gifts'}, n).tool_calls[0]);
+  const batch = search(); batch.tool_calls = Array.from({length: 17}, (_, n) => tool('search_catalog', {query: 'gifts'}, n).tool_calls[0]);
   const big = harness([batch]); await rejectsCode(() => runGiftAgent(profile, big.options), 'AGENT_LIMIT'); assert.equal(big.shopCalls.length, 0);
 });
 test('missing credential fails explicitly and performs no network request', async () => {
@@ -100,7 +100,7 @@ test('unseen option labels cannot be transmitted; relaxed selected options canno
   await rejectsCode(() => runGiftAgent(profile, unknown.options), 'AGENT_INVALID_RESPONSE'); assert.equal(unknown.shopCalls.length, 1);
   const relaxed = harness([search(), tool('get_product', {productId: id, selected: [{name: 'Color', label: 'Blue'}]}, 2), finish()], p);
   relaxed.options.callShop = async name => name === 'search_catalog' ? {products: [p]} : {product: {...p, selected: [{name: 'Color', label: 'Red'}]}};
-  await rejectsCode(() => runGiftAgent(profile, relaxed.options), 'AGENT_INVALID_RESPONSE');
+  assert.equal((await runGiftAgent(profile,relaxed.options)).recommendations.length,0);
 });
 test('multiline preferences normalize, and model sees only bounded catalog evidence', async () => {
   const p = product(); p.arbitraryPrivateField = 'must-not-be-forwarded'; p.media = [{url: 'https://fixture.myshopify.com/huge.png'}]; p.description.plain = 'Ocean '.repeat(900);
@@ -118,4 +118,72 @@ test('chosen refreshed variant is first for UI without changing merchant variant
 test('giver-only preferences cannot trigger model use or become recipient evidence',async()=>{
  const h=harness();await rejectsCode(()=>runGiftAgent({...profile,likes:'I love ocean.'},h.options),'INVALID_AGENT_INPUT');assert.equal(h.modelCalls.length,0);
  const mixed=harness();await runGiftAgent({...profile,likes:'I love chess but they enjoy ocean walks.'},mixed.options);const sent=JSON.parse(mixed.modelCalls[0].messages[1].content);assert.doesNotMatch(sent.likes,/chess|I love/);assert.match(sent.likes,/ocean/);
+});
+
+test('diagnostic: Gateway HTTP failures use static safe error codes without provider text',async()=>{
+ for(const [status,code] of [[400,'AGENT_PROVIDER_REQUEST'],[401,'AGENT_AUTH'],[402,'AGENT_CREDITS'],[403,'AGENT_AUTH'],[404,'AGENT_MODEL_UNAVAILABLE'],[429,'AGENT_PROVIDER_RATE_LIMIT'],[500,'AGENT_UPSTREAM']]){const call=createGatewayModel({getToken:()=> 'synthetic',fetchImpl:async()=>new Response('DO_NOT_EXPOSE_PROVIDER_BODY',{status})});await assert.rejects(()=>call({messages:[],tools:[],model:'openai/gpt-4.1-mini'}),e=>e.code===code&&!e.message.includes('DO_NOT_EXPOSE'));}
+});
+test('diagnostic: failures expose only bounded execution stages',async()=>{
+ await assert.rejects(()=>runGiftAgent(profile,{callModel:()=>{throw new Error('PRIVATE_PROMPT')}}),e=>e.stage==='model'&&e.code==='AGENT_UPSTREAM'&&!e.message.includes('PRIVATE'));
+ const h=harness([tool('get_product',{productId:id,selected:[]})]);await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.stage==='tool_arguments'&&e.code==='AGENT_INVALID_RESPONSE');
+});
+test('resilience: featured variant options can ground a refresh without product option table',async()=>{
+ const p=product();delete p.options;delete p.selected;p.variants[0].options=[{name:'Color',label:'Blue'}];
+ const h=harness([search(),tool('get_product',{productId:id,selected:[{name:'Color',label:'Blue'}]},2),finish()],p);h.options.callShop=async name=>name==='search_catalog'?{products:[p]}:{product:{...p,selected:[{name:'Color',label:'Blue'}]}};
+ assert.equal((await runGiftAgent(profile,h.options)).recommendations.length,1);
+});
+test('resilience: last model step is reserved for completion with tools disabled',async()=>{
+ const h=harness([search(),refresh(),finish()]);await runGiftAgent(profile,{...h.options,maxSteps:3});assert.equal(h.modelCalls.at(-1).toolChoice,'none');
+});
+test('resilience: bounded raw catalog projects before model limit and accepts fenced JSON',async()=>{
+ const p=product();p.description.plain+='x'.repeat(300000);const f=finish();f.content='```json\n'+f.content+'\n```';const h=harness([search(),refresh(),f],p);const result=await runGiftAgent(profile,h.options);assert.equal(result.recommendations.length,1);assert.ok(h.modelCalls[1].messages.at(-1).content.length<15000);
+});
+
+test('resilience: one contraindicated refreshed candidate does not discard another valid candidate',async()=>{
+ const good=product();const bad=product();bad.id='gid://shopify/Product/bad';bad.variants[0].id='gid://shopify/ProductVariant/bad';bad.variants[0].price.amount=6000;
+ const final={role:'assistant',content:JSON.stringify({summary:'A choice',recommendations:[{productId:id,variantId:vid,reason:'Ocean ceramic mug'},{productId:bad.id,variantId:bad.variants[0].id,reason:'Ocean ceramic mug'}]})};
+ const h=harness([search(),refresh(),tool('get_product',{productId:bad.id,selected:[]},3),final]);h.options.callShop=async(name,args)=>name==='search_catalog'?{products:[good,bad]}:{product:args.catalog.id===id?good:bad};
+ const r=await runGiftAgent(profile,h.options);assert.equal(r.recommendations.length,1);assert.equal(r.recommendations[0].productId,id);assert.equal(r.products.length,1);
+});
+
+test('main gift selection filters greeting-card products but keeps inexpensive real gifts',async()=>{
+ const card=product();card.title='Ocean greeting card';card.variants[0].price.amount=400;
+ assert.equal((await runGiftAgent({...profile,budget:100},harness(undefined,card).options)).recommendations.length,0);
+ const explicit=await runGiftAgent({...profile,likes:'They collect greeting cards',budget:100},harness(undefined,card).options);
+ assert.equal(explicit.recommendations.length,1);assert.equal(explicit.recommendations[0].giftRole,'primary');
+ const mug=product();mug.variants[0].price.amount=500;
+ assert.equal((await runGiftAgent({...profile,budget:100},harness(undefined,mug).options)).recommendations.length,1);
+});
+test('returns ten exact refreshed choices with refresh concurrency capped at three',async()=>{
+ const products=Array.from({length:10},(_,n)=>{const p=product();p.id=`gid://shopify/Product/p${n}`;p.variants[0].id=`gid://shopify/ProductVariant/v${n}`;return p;});
+ const batch={role:'assistant',tool_calls:products.map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const final={role:'assistant',content:JSON.stringify({summary:'Choices',recommendations:products.map(p=>({productId:p.id,variantId:p.variants[0].id,reason:p.title}))})};
+ const replies=[search(),batch,final];let active=0,peak=0;const requests=[];
+ const result=await runGiftAgent({...profile,budget:100},{maxSteps:3,callModel:async r=>{requests.push(r);return replies.shift();},callShop:async(name,args)=>{
+  if(name==='search_catalog')return {products};
+  active++;peak=Math.max(peak,active);await new Promise(resolve=>setTimeout(resolve,5));active--;
+  return {product:products.find(p=>p.id===args.catalog.id)};
+ }});
+ assert.equal(result.recommendations.length,10);assert.equal(peak,3);assert.equal(requests.at(-1).toolChoice,'none');
+ assert.match(requests[0].messages[0].content,/Default to 10 distinct, diverse main gifts/);
+});
+test('parallel batch validates every operation before issuing any refresh',async()=>{
+ const batch=refresh();batch.tool_calls.push(tool('get_product',{productId:'gid://shopify/Product/unseen',selected:[]},3).tool_calls[0]);
+ const h=harness([search(),batch]);await rejectsCode(()=>runGiftAgent(profile,h.options),'AGENT_INVALID_RESPONSE');assert.equal(h.shopCalls.length,1);
+});
+test('Gateway enables parallel read-only tool requests',async()=>{
+ let body;const call=createGatewayModel({getToken:()=> 'synthetic',fetchImpl:async(url,init)=>{body=JSON.parse(init.body);return new Response(JSON.stringify({choices:[{message:finish()}]}));}});
+ await call({messages:[],tools:[],model:'openai/gpt-4.1-mini'});assert.equal(body.parallel_tool_calls,true);
+});
+
+test('self-gift context enables first-person recipient interests without identity fields',async()=>{
+ const h=harness();const result=await runGiftAgent({...profile,likes:'I love ocean walks.',selfGift:true},h.options);
+ assert.equal(result.recommendations.length,1);
+ const sent=JSON.parse(h.modelCalls[0].messages[1].content);
+ assert.equal(sent.selfGift,true);assert.match(sent.likes,/I love ocean/);
+ assert.equal(Object.hasOwn(sent,'recipient'),false);assert.equal(Object.hasOwn(sent,'relationship'),false);
+ assert.match(h.modelCalls[0].messages[0].content,/When selfGift is true/);
+ const other=harness();await runGiftAgent(profile,other.options);assert.equal(JSON.parse(other.modelCalls[0].messages[1].content).selfGift,false);
+ for(const selfGift of [false,undefined])await rejectsCode(()=>runGiftAgent({...profile,likes:'I love ocean walks.',selfGift},harness().options),'INVALID_AGENT_INPUT');
+ for(const selfGift of ['true',1,null,{}])await rejectsCode(()=>runGiftAgent({...profile,selfGift},harness().options),'INVALID_AGENT_INPUT');
 });

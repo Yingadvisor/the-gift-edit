@@ -26,12 +26,13 @@ export function validateProfile(input) {
   const recipient = String(input?.recipient ?? '').trim();
   const likes = String(input?.likes ?? '').trim();
   const budget = Number(input?.budget);
+  if (input?.selfGift !== undefined && typeof input.selfGift !== 'boolean') errors.push('Self-gift context must be a boolean.');
   if (!recipient || recipient.length > 80) errors.push('Add a recipient name or description, up to 80 characters.');
   if (!likes || likes.length > 1200) errors.push('Tell us what the recipient likes, up to 1,200 characters.');
   if (!Number.isFinite(budget) || budget <= 0 || budget > 10000) errors.push('Enter a demo budget greater than 0 and no more than 10,000.');
   if (String(input?.dislikes ?? '').length > 1200) errors.push('Keep dislikes under 1,200 characters.');
   if (String(input?.occasion ?? '').length > 80) errors.push('Keep the occasion under 80 characters.');
-  return { valid: !errors.length, errors, profile: {recipient, likes, budget, dislikes: String(input?.dislikes ?? '').trim(), occasion: String(input?.occasion ?? 'Just because').trim(), relationship: String(input?.relationship ?? '').slice(0,80)} };
+  return { valid: !errors.length, errors, profile: {recipient, likes, budget, selfGift: input?.selfGift === true, dislikes: String(input?.dislikes ?? '').trim(), occasion: String(input?.occasion ?? 'Just because').trim(), relationship: String(input?.relationship ?? '').slice(0,80)} };
 }
 
 /** Rules deliberately prefer uncertainty over invented recipient interests. */
@@ -40,7 +41,7 @@ export function extractEvidence(profile) {
   const notices = [];
   for (const fragment of profile.likes.replace(/[’]/g, "'").split(/[.!?;\n]+|\b(?:but|whereas|while)\b|\band(?=\s+(?:they|he|she|I|we|the recipient)\b)/i).filter(Boolean)) {
     // Giver interests must never silently become recipient preferences.
-    if (/\b(i|me|we|our|my)\b/i.test(fragment)) {
+    if (profile.selfGift !== true && profile.relationship !== 'Myself' && /\b(i|me|we|our|my)\b/i.test(fragment)) {
       notices.push('A first-person statement was not treated as the recipient’s preference. Rewrite it as “They like …” if that is what you mean.');
       continue;
     }

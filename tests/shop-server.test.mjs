@@ -355,3 +355,193 @@ test('checkout details review hash stays server-local and is not sent to the mer
     assert.equal(call.options.body.includes(request.expectedDetailsHash), false);
   }
 });
+
+function setFixtures() {
+  const first = freshProduct();
+  const second = freshProduct();
+  second.id = 'gid://shopify/p/second';
+  second.title = 'Second gift';
+  second.variants[0].id = 'gid://shopify/ProductVariant/second';
+  second.variants[0].price.amount = 2100;
+  const products = [first, second];
+  const request = {action: 'checkout_set', items: products.map(product => ({productId: product.id, variantId: product.variants[0].id, selected: structuredClone(product.selected), shop, expectedPrice: structuredClone(product.variants[0].price), expectedDetailsHash: detailsHash(product)})), budget: 100, requestId: randomUUID(), confirmed: true};
+  const checkout = freshCheckout();
+  checkout.line_items = products.map((product, i) => ({id: `line-${i}`, item: {id: product.variants[0].id, title: product.title, price: product.variants[0].price}, quantity: 1}));
+  checkout.totals = [{type: 'subtotal', amount: 8500}, {type: 'total', amount: 8500}];
+  return {products, request, checkout};
+}
+
+test('set checkout refreshes both exact items before a single multi-line write', async () => {
+  const {products, request, checkout} = setFixtures();
+  const secondWarning = {...warning, code: 'second_product_warning'};
+  const mock = mockFetch([{product: products[0], messages: [warning]}, {product: products[1], messages: [secondWarning]}, checkout]);
+  const result = await invoke(createShopHandler(mock), request);
+  assert.equal(result.status, 200);
+  assert.deepEqual(mock.calls.map(call => call.request.params.name), ['get_product', 'get_product', 'create_checkout']);
+  for (let i = 0; i < 2; i++) assert.deepEqual(mock.calls[i].request.params.arguments, {catalog: {id: request.items[i].productId, selected: request.items[i].selected, ...catalogContextForSet()}});
+  assert.deepEqual(mock.calls[2].request.params.arguments, {shop, checkout: {line_items: request.items.map(item => ({item: {id: item.variantId}, quantity: 1})), context: {address_country: 'US'}}, meta: {'idempotency-key': request.requestId}});
+  assert.deepEqual(result.body.messages, [warning, secondWarning, ...checkout.messages]);
+  assert.equal(result.body.checkout.continue_url, checkout.continue_url);
+  assert.doesNotMatch(result.text, /SECRET_PAYMENT_TOKEN|SECRET_CHECKOUT_ID|private@example.org/);
+});
+function catalogContextForSet() {return {...expectedContext, filters: {...expectedContext.filters, price: {max: 10000}}};}
+
+for (const [name, mutate, code] of [
+  ['price', product => {product.variants[0].price.amount++;}, 'PRICE_CHANGED'],
+  ['details', product => {product.description = 'New material';}, 'DETAILS_CHANGED'],
+  ['stock', product => {product.variants[0].availability.available = false;}, 'OUT_OF_STOCK'],
+  ['seller', product => {product.variants[0].seller.domain = 'other.myshopify.com';}, 'MERCHANT_CHANGED'],
+  ['options', product => {product.selected = [];}, 'OPTIONS_CHANGED'],
+  ['currency', product => {product.variants[0].price.currency = 'CAD';}, 'CURRENCY_CHANGED'],
+]) {
+  test(`second item ${name} drift prevents the entire set write`, async () => {
+    const {products, request} = setFixtures(); mutate(products[1]);
+    const mock = mockFetch(products.map(product => ({product})));
+    const result = await invoke(createShopHandler(mock), request);
+    assert.equal(result.body.error.code, code);
+    assert.equal(result.body.error.reviewRequired, true);
+    assert.equal(result.body.error.outcomeUncertain, false);
+    assert.equal(mock.calls.length, 2); assertNoWrite(mock.calls);
+  });
+}
+
+test('invalid sets, mixed merchants, duplicate IDs and extra fields fail before any network use', async () => {
+  for (const mutate of [
+    r => {r.items = [];}, r => {r.items = Array(7).fill(r.items[0]);}, r => {r.items[1] = structuredClone(r.items[0]);},
+    r => {r.items[1].shop = 'other.myshopify.com';}, r => {r.items[1].quantity = 2;},
+    r => {r.items[1].expectedPrice.amount = 21.5;}, r => {r.items[1].expectedPrice.currency = 'CAD';},
+    r => {r.items[1].expectedDetailsHash = '';}, r => {r.items[1].variantId = 'bad';},
+    r => {r.items[1].selected.push({...r.items[1].selected[0]});}, r => {r.confirmed = false;},
+    r => {r.items[1] = null;}, r => {r.items[1].expectedPrice.extra = true;},
+    r => {r.payment = {};}, r => {r.requestId = 'bad';}, r => {r.budget = 100.001;},
+  ]) {
+    const {request} = setFixtures(); mutate(request);
+    const mock = mockFetch([]); const result = await invoke(createShopHandler(mock), request);
+    assert.equal(result.status, 400); assert.equal(mock.calls.length, 0);
+  }
+});
+
+test('combined set subtotal exceeding the budget fails even when each item individually fits', async () => {
+  const {request} = setFixtures(); request.budget = 80;
+  const mock = mockFetch([]); const result = await invoke(createShopHandler(mock), request);
+  assert.equal(result.body.error.code, 'OVER_BUDGET'); assert.equal(result.body.error.reviewRequired, true); assertNoWrite(mock.calls);
+});
+
+test('reordered set with a fresh UUID cannot create a second checkout', async () => {
+  const {products, request, checkout} = setFixtures();
+  const mock = mockFetch([...products.map(product => ({product})), checkout]); const handler = createShopHandler(mock);
+  assert.equal((await invoke(handler, request)).status, 200);
+  assert.equal((await invoke(handler, {...request, requestId: randomUUID(), items: [...request.items].reverse(), budget: 110})).body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  assert.equal((await invoke(handler, request)).body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  assert.equal(mock.calls.length, 3);
+});
+
+test('uncertain set write cannot be retried or replaced after the double-click interval', async () => {
+  let time = 1792000000000;
+  const {products, request} = setFixtures();
+  const mock = mockFetch([...products.map(product => ({product})), () => {throw new Error('write timeout');}]);
+  const handler = createShopHandler({...mock, now: () => time});
+  const result = await invoke(handler, request);
+  assert.equal(result.body.error.outcomeUncertain, true);
+  time += 60000;
+  assert.equal((await invoke(handler, {...request, items: [...request.items].reverse(), requestId: randomUUID(), budget: 150})).body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  assert.equal(mock.calls.length, 3);
+});
+
+test('set checkout response must contain exactly the selected unique variants with quantity one', async () => {
+  for (const mutate of [
+    c => c.line_items.push(structuredClone(c.line_items[0])),
+    c => {c.line_items.pop();},
+    c => {c.line_items[1] = structuredClone(c.line_items[0]);},
+    c => {c.line_items[1].quantity = 2;},
+    c => {c.line_items[1].item.id = 'gid://shopify/ProductVariant/extra';},
+  ]) {
+    const {products, request, checkout} = setFixtures(); mutate(checkout);
+    const mock = mockFetch([...products.map(product => ({product})), checkout]); const handler = createShopHandler(mock);
+    const result = await invoke(handler, request);
+    assert.equal(result.body.error.code, 'CHECKOUT_ITEMS_CHANGED');
+    assert.equal(result.body.error.reviewRequired, true); assert.equal(result.body.error.outcomeUncertain, true);
+    assert.equal((await invoke(handler, {...request, items: [...request.items].reverse(), requestId: randomUUID()})).body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+    assert.equal(mock.calls.length, 3);
+  }
+});
+
+test('set checkout accepts merchant line order changes but strips nested payment fields', async () => {
+  const {products, request, checkout} = setFixtures();
+  checkout.line_items.reverse(); checkout.line_items[0].payment = {token: 'SECRET_NESTED_SET'};
+  checkout.messages[0].credentials = 'SECRET_MESSAGE_SET';
+  const mock = mockFetch([...products.map(product => ({product})), checkout]);
+  const result = await invoke(createShopHandler(mock), request);
+  assert.equal(result.status, 200); assert.doesNotMatch(result.text, /SECRET_NESTED_SET|SECRET_MESSAGE_SET/);
+});
+
+test('uncertain set protects overlapping subsets, supersets and single-item checkout routes', async () => {
+  let time = 1792000000000;
+  const {products, request} = setFixtures();
+  const mock = mockFetch([...products.map(product => ({product})), () => {throw new Error('uncertain write');}]);
+  const handler = createShopHandler({...mock, now: () => time});
+  assert.equal((await invoke(handler, request)).body.error.outcomeUncertain, true);
+  time += 60000;
+  const extra = {...request.items[0], productId: 'gid://shopify/p/third', variantId: 'gid://shopify/ProductVariant/third'};
+  for (const items of [[request.items[0]], [request.items[1]], [request.items[1], extra]]) {
+    const result = await invoke(handler, {...request, items, budget: 200, requestId: randomUUID()});
+    assert.equal(result.body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  }
+  assert.equal((await invoke(handler, {...checkoutRequest(), budget: 200})).body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  assert.equal(mock.calls.length, 3);
+});
+
+test('pending set protects overlapping groups until refresh completes', async () => {
+  let release; const waiting = new Promise(resolve => {release = resolve;});
+  const {products, request, checkout} = setFixtures();
+  const mock = mockFetch([async req => {await waiting; return Response.json({jsonrpc: '2.0', id: req.id, result: {structuredContent: {product: products[0]}}});}, {product: products[1]}, checkout]);
+  const handler = createShopHandler(mock); const pending = invoke(handler, request);
+  await new Promise(resolve => setImmediate(resolve));
+  const overlap = await invoke(handler, {...request, items: [request.items[1]], requestId: randomUUID()});
+  assert.equal(overlap.body.error.code, 'CHECKOUT_ALREADY_REQUESTED');
+  release(); assert.equal((await pending).status, 200); assert.equal(mock.calls.length, 3);
+});
+
+test('pre-write drift releases set and variant guards for an explicitly re-reviewed request', async () => {
+  const {products, request, checkout} = setFixtures();
+  const changed = structuredClone(products[1]); changed.description = 'New details';
+  const mock = mockFetch([{product: products[0]}, {product: changed}, ...products.map(product => ({product})), checkout]);
+  const handler = createShopHandler(mock);
+  assert.equal((await invoke(handler, request)).body.error.code, 'DETAILS_CHANGED');
+  assert.equal((await invoke(handler, {...request, requestId: randomUUID()})).status, 200);
+  assert.equal(mock.calls.length, 5);
+});
+
+test('set refresh time budget stops further reads before any checkout write', async () => {
+  let time = 1792000000000;
+  const {products, request} = setFixtures();
+  request.items.push({...request.items[1], productId: 'gid://shopify/p/third', variantId: 'gid://shopify/ProductVariant/third'});
+  request.budget = 150;
+  const mock = mockFetch(products.map(product => req => {
+    time += 13000;
+    return Response.json({jsonrpc: '2.0', id: req.id, result: {structuredContent: {product}}});
+  }));
+  const result = await invoke(createShopHandler({...mock, now: () => time}), request);
+  assert.equal(result.body.error.code, 'REFRESH_EXPIRED');
+  assert.equal(result.body.error.reviewRequired, true);
+  assert.equal(result.body.error.outcomeUncertain, false);
+  assert.equal(mock.calls.length, 2); assertNoWrite(mock.calls);
+});
+
+test('set refresh reaching budget on final read refuses write and releases guards', async () => {
+  let time = 1792000000000;
+  const {products, request, checkout} = setFixtures();
+  const slow = products.map(product => req => {
+    time += 12500;
+    return Response.json({jsonrpc: '2.0', id: req.id, result: {structuredContent: {product}}});
+  });
+  const mock = mockFetch([...slow, ...products.map(product => ({product})), checkout]);
+  const handler = createShopHandler({...mock, now: () => time});
+  const result = await invoke(handler, request);
+  assert.equal(result.body.error.code, 'REFRESH_EXPIRED');
+  assert.equal(result.body.error.reviewRequired, true);
+  assert.equal(result.body.error.outcomeUncertain, false);
+  assert.equal(mock.calls.length, 2); assertNoWrite(mock.calls);
+  assert.equal((await invoke(handler, {...request, requestId: randomUUID()})).status, 200);
+  assert.equal(mock.calls.length, 5);
+});

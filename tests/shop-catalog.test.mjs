@@ -14,3 +14,34 @@ test('unsafe URLs and missing images fail closed',()=>{for(const u of ['javascri
 test('brief keeps personal details local and distinguishes merchant and Atelier',()=>{const rec=rankShopProducts([product()],profile).recommendations[0];const b=shopBrief(profile,rec);assert.match(b,/Recipient: Alex/);assert.match(b,/pays on the merchant page/);assert.match(b,/Expression Atelier is separate/);assert.match(b,/not an LLM/);});
 test('live description.plain shape is used for exclusions and treated as inert text',()=>{const p=product({description:{plain:'<p>This ocean mug comes with silk fabric.</p>'}});assert.equal(rankShopProducts([p],profile).recommendations.length,0);});
 test('rationales cite supplied recipient words, not every synonym expansion',()=>{const p=product();const r=rankShopProducts([p],{...profile,likes:'They love ocean.'});assert.deepEqual(r.recommendations[0].evidence,['ocean']);});
+
+test('main gift ranking removes greeting cards for birthdays without removing actual card gifts',()=>{
+ const make=(title,n)=>product({id:`gid://shopify/Product/${n}`,title,description:'Ocean gift'});
+ const result=rankShopProducts([make('Ocean greeting card',1),make('Ocean cardigan',2),make('Ocean card game',3),make('Ocean wallet card holder',4),make('Ocean gift wrapping paper',5)],{...profile,budget:100,occasion:'Birthday'});
+ assert.deepEqual(result.recommendations.map(r=>r.product.title),['Ocean cardigan','Ocean card game','Ocean wallet card holder']);
+ assert.ok(result.recommendations.every(r=>r.giftRole==='primary'));assert.equal(result.rejected.length,2);
+});
+test('main gift ranking honors explicit card searches and recipient interests, not occasion alone',()=>{
+ const p=product({title:'Ocean greeting card'});
+ assert.equal(rankShopProducts([p],{...profile,query:'Ocean greeting cards'}).recommendations.length,1);
+ assert.equal(rankShopProducts([p],{...profile,likes:'They collect greeting cards'}).recommendations.length,1);
+ assert.equal(rankShopProducts([p],{...profile,occasion:'Birthday'}).recommendations.length,0);
+});
+test('catalog returns up to ten distinct real primary gifts and never pads results',()=>{
+ const products=Array.from({length:15},(_,n)=>product({id:`gid://shopify/Product/${n}`,title:`Ocean mug ${n}`}));
+ assert.equal(rankShopProducts(products,profile).recommendations.length,10);
+ assert.equal(rankShopProducts([products[0],products[0],products[1]],profile).recommendations.length,2);
+ assert.equal(rankShopProducts([],profile).recommendations.length,0);
+});
+test('soft value and category variety ordering preserve useful low-cost gifts',()=>{
+ const make=(title,n,price)=>{const p=product({id:`gid://shopify/Product/${n}`,title,description:'Ocean gift'});p.variants[0].price.amount=price;return p;};
+ const result=rankShopProducts([make('Ocean mug',1,400),make('Ocean mug',2,5000),make('Ocean mug',3,5000),make('Ocean towel',4,5000)],{...profile,budget:100});
+ assert.equal(result.recommendations[0].product.id,'gid://shopify/Product/2');
+ assert.equal(result.recommendations[1].product.title,'Ocean towel');
+ assert.ok(result.recommendations.some(r=>r.variant.price.amount===400));
+ assert.equal(result.recommendations.length,4);
+});
+test('gift set helpers are re-exported for the UI catalog entrypoint',async()=>{
+ const catalog=await import('../src/shop-catalog.mjs');const set=await import('../src/gift-set.mjs');
+ for(const name of ['summarizeGiftSet','canAddToGiftSet','setItemKey'])assert.equal(catalog[name],set[name]);
+});

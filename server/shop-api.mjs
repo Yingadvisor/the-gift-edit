@@ -4,6 +4,7 @@ import {reviewContent} from '../src/product-review.mjs';
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_BUDGET_CENTS = 1_000_000;
+const SET_REFRESH_BUDGET_MS = 25000;
 const CONTEXT = Object.freeze({address_country: 'US', currency: 'USD'});
 const CHECKOUT_STATUSES = new Set(['incomplete', 'requires_escalation', 'ready_for_complete', 'complete_in_progress', 'completed', 'canceled']);
 const GID = /^gid:\/\/shopify\/[A-Za-z][A-Za-z0-9_-]*\/[A-Za-z0-9_-]+$/;
@@ -121,11 +122,18 @@ function scrub(value, depth = 0) {
   return result;
 }
 
-function safeCheckout(document, variantId) {
+function safeCheckout(document, variantIds) {
+  const expected = new Set(Array.isArray(variantIds) ? variantIds : [variantIds]);
+  const returned = new Set();
   if (!CHECKOUT_STATUSES.has(document.status) || typeof document.currency !== 'string' || !Array.isArray(document.totals) || !Array.isArray(document.links) || !safeHttps(document.continue_url)) {
     throw new ShopError('UPSTREAM_INVALID_RESPONSE', {outcomeUncertain: true});
   }
-  if (!Array.isArray(document.line_items) || document.line_items.length !== 1 || document.line_items[0]?.item?.id !== variantId || document.line_items[0]?.quantity !== 1) {
+  if (!Array.isArray(document.line_items) || document.line_items.length !== expected.size || !document.line_items.every(line => {
+    const id = line?.item?.id;
+    if (!expected.has(id) || returned.has(id) || line.quantity !== 1) return false;
+    returned.add(id);
+    return true;
+  })) {
     review('CHECKOUT_ITEMS_CHANGED', 'The merchant returned different checkout items. Do not continue without reviewing them.');
   }
   const result = {};
@@ -209,6 +217,7 @@ export function createShopHandler({fetchImpl = globalThis.fetch, now = () => Dat
   const rates = new Map();
   const checkoutRequests = new Map();
   const recentCheckouts = new Map();
+  const guardedVariants = new Map();
   const hash = value => createHmac('sha256', secret).update(value).digest('hex');
   const prune = (map, at) => { for (const [key, value] of map) if (value.expiresAt <= at) map.delete(key); };
   const gate = req => {
@@ -253,61 +262,95 @@ export function createShopHandler({fetchImpl = globalThis.fetch, now = () => Dat
         const data = await client.callTool('get_product', {catalog: {id, selected, ...catalogContext(max)}});
         if (!isRecord(data.product) || data.product.id !== id) throw new ShopError('UPSTREAM_INVALID_RESPONSE');
         result = {product: data.product, messages: messages(data), fetchedAt: new Date(now()).toISOString()};
-      } else if (body.action === 'checkout') {
-        exactKeys(body, ['action', 'productId', 'selected', 'variantId', 'shop', 'budget', 'expectedPrice', 'expectedDetailsHash', 'requestId', 'confirmed']);
-        if (body.confirmed !== true) fail('BUYER_CONFIRMATION_REQUIRED', 'Select the checkout button after reviewing this exact item.', 400);
-        const productId = identifier(body.productId, 'product ID');
-        const variantId = identifier(body.variantId, 'variant ID');
-        const selected = selection(body.selected);
-        const shop = domain(body.shop);
+      } else if (body.action === 'checkout' || body.action === 'checkout_set') {
+        const isSet = body.action === 'checkout_set';
+        exactKeys(body, isSet ? ['action', 'items', 'budget', 'requestId', 'confirmed'] : ['action', 'productId', 'selected', 'variantId', 'shop', 'budget', 'expectedPrice', 'expectedDetailsHash', 'requestId', 'confirmed']);
+        if (body.confirmed !== true) fail('BUYER_CONFIRMATION_REQUIRED', 'Select the checkout button after reviewing these exact items.', 400);
         const max = budgetCents(body.budget);
-        exactKeys(body.expectedPrice, ['amount', 'currency']);
-        if (!Number.isSafeInteger(body.expectedPrice.amount) || body.expectedPrice.amount < 0 || body.expectedPrice.amount > MAX_BUDGET_CENTS || body.expectedPrice.currency !== 'USD') {
-          fail('INVALID_REQUEST', 'Review a current USD price before opening checkout.');
-        }
-        if (typeof body.expectedDetailsHash !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedDetailsHash)) {
-          fail('INVALID_REQUEST', 'Review the exact product details before opening checkout.');
-        }
+        const rawItems = isSet ? body.items : [body];
+        if (!Array.isArray(rawItems) || rawItems.length < 1 || rawItems.length > 6) fail('INVALID_REQUEST', 'Choose between one and six items for a merchant checkout.');
+        const items = rawItems.map(item => {
+          if (isSet) exactKeys(item, ['productId', 'selected', 'variantId', 'shop', 'expectedPrice', 'expectedDetailsHash']);
+          const productId = identifier(item.productId, 'product ID');
+          const variantId = identifier(item.variantId, 'variant ID');
+          const selected = selection(item.selected);
+          const shop = domain(item.shop);
+          exactKeys(item.expectedPrice, ['amount', 'currency']);
+          if (!Number.isSafeInteger(item.expectedPrice.amount) || item.expectedPrice.amount < 0 || item.expectedPrice.amount > MAX_BUDGET_CENTS || item.expectedPrice.currency !== 'USD') {
+            fail('INVALID_REQUEST', 'Review a current USD price before opening checkout.');
+          }
+          if (typeof item.expectedDetailsHash !== 'string' || !/^[a-f0-9]{64}$/.test(item.expectedDetailsHash)) {
+            fail('INVALID_REQUEST', 'Review the exact product details before opening checkout.');
+          }
+          return {productId, variantId, selected, shop, expectedPrice: item.expectedPrice, expectedDetailsHash: item.expectedDetailsHash};
+        });
+        if (new Set(items.map(item => item.variantId)).size !== items.length) fail('INVALID_REQUEST', 'Each variant may appear only once in a gift set.');
+        const shop = items[0].shop;
+        if (items.some(item => item.shop !== shop)) fail('INVALID_REQUEST', 'Create a separate checkout for each merchant.');
+        if (isSet && items.reduce((total, item) => total + item.expectedPrice.amount, 0) > max) review('OVER_BUDGET', 'The gift set item subtotal exceeds your budget. Review it again.');
         if (typeof body.requestId !== 'string' || !UUID.test(body.requestId)) fail('INVALID_REQUEST', 'A fresh checkout request ID is required.');
         const at = now();
-        prune(checkoutRequests, at); prune(recentCheckouts, at);
+        prune(checkoutRequests, at); prune(recentCheckouts, at); prune(guardedVariants, at);
         const requestKey = hash(body.requestId.toLowerCase());
-        const fingerprint = hash(JSON.stringify({productId, variantId, selected: [...selected].sort((a,b) => a.name.localeCompare(b.name)), shop, max, expectedPrice: body.expectedPrice, expectedDetailsHash: body.expectedDetailsHash}));
+        // Group guards deliberately ignore price/budget/option order so a reordered
+        // retry cannot replace a possibly-created merchant checkout.
+        const fingerprint = hash(JSON.stringify(isSet
+          ? {shop, variantIds: items.map(item => item.variantId).sort()}
+          : {...items[0], selected: [...items[0].selected].sort((a,b) => a.name.localeCompare(b.name)), max}));
         const recentKey = hash(clientKey + fingerprint);
+        const variantKeys = items.map(item => hash(JSON.stringify({clientKey, shop, variantId: item.variantId})));
         if (checkoutRequests.has(requestKey)) fail('CHECKOUT_ALREADY_REQUESTED', 'This checkout request was already submitted. Do not submit it again.', 409);
         if (recentCheckouts.has(recentKey)) fail('CHECKOUT_ALREADY_REQUESTED', 'A checkout for this item was just requested. Please do not double-click.', 409);
+        if (variantKeys.some(key => guardedVariants.has(key))) fail('CHECKOUT_ALREADY_REQUESTED', 'A checkout containing one of these items is pending or uncertain. Do not submit a replacement.', 409);
         if (checkoutRequests.size >= maxCheckoutEntries || recentCheckouts.size >= maxCheckoutEntries) fail('RATE_LIMITED', 'Checkout is busy. Please try again later.', 429);
         checkoutRequests.set(requestKey, {expiresAt: at + checkoutTtlMs});
         recentCheckouts.set(recentKey, {expiresAt: at + 30000});
+        for (const key of variantKeys) guardedVariants.set(key, {expiresAt: at + checkoutTtlMs});
         let writeDispatched = false;
         try {
-          const data = await client.callTool('get_product', {catalog: {id: productId, selected, ...catalogContext(max)}});
-          const product = data.product;
-          if (!isRecord(product) || product.id !== productId || !Array.isArray(product.variants)) review('PRODUCT_CHANGED', 'The product changed. Review it again before checkout.');
-          const candidates = product.variants.filter(variant => variant?.id === variantId);
-          if (candidates.length !== 1) review('VARIANT_CHANGED', 'The selected variant changed. Review the available options again.');
-          const variant = candidates[0];
-          if (!hasExactSelection(product, variant, selected)) review('OPTIONS_CHANGED', 'The merchant changed or relaxed your selected options. Review them again.');
-          if (variant.seller?.domain !== shop) review('MERCHANT_CHANGED', 'The merchant changed. Review the item again.');
-          if (variant.availability?.available !== true) review('OUT_OF_STOCK', 'This exact variant is no longer available. Choose another option.');
-          if (!Number.isSafeInteger(variant.price?.amount) || variant.price.amount < 0 || variant.price.currency !== 'USD') review('CURRENCY_CHANGED', 'A current USD price is unavailable. Review the item again.');
-          if (variant.price.amount > max) review('OVER_BUDGET', 'The current item price is above your budget. Review it again.');
-          if (variant.price.amount !== body.expectedPrice.amount || variant.price.currency !== body.expectedPrice.currency) review('PRICE_CHANGED', 'The item price changed. Review the new price before checkout.');
-          const detailsHash = createHash('sha256').update(reviewContent(product, variant)).digest('hex');
-          if (detailsHash !== body.expectedDetailsHash) review('DETAILS_CHANGED', 'The product details changed. Review them against the recipient\'s requirements before checkout.');
-          const refreshedMessages = messages(data);
+          const refreshedMessages = [];
+          let subtotal = 0;
+          // Bound serial reads before dispatching any write. A read started just
+          // under this deadline may use its normal timeout; never write afterward.
+          const assertRefreshBudget = () => {
+            if (isSet && now() - at >= SET_REFRESH_BUDGET_MS) review('REFRESH_EXPIRED', 'Checking this gift set took too long. Review the items again before opening checkout.');
+          };
+          for (const item of items) {
+            assertRefreshBudget();
+            const {productId, variantId, selected} = item;
+            const data = await client.callTool('get_product', {catalog: {id: productId, selected, ...catalogContext(max)}});
+            const product = data.product;
+            if (!isRecord(product) || product.id !== productId || !Array.isArray(product.variants)) review('PRODUCT_CHANGED', 'The product changed. Review it again before checkout.');
+            const candidates = product.variants.filter(variant => variant?.id === variantId);
+            if (candidates.length !== 1) review('VARIANT_CHANGED', 'The selected variant changed. Review the available options again.');
+            const variant = candidates[0];
+            if (!hasExactSelection(product, variant, selected)) review('OPTIONS_CHANGED', 'The merchant changed or relaxed your selected options. Review them again.');
+            if (variant.seller?.domain !== shop) review('MERCHANT_CHANGED', 'The merchant changed. Review the item again.');
+            if (variant.availability?.available !== true) review('OUT_OF_STOCK', 'This exact variant is no longer available. Choose another option.');
+            if (!Number.isSafeInteger(variant.price?.amount) || variant.price.amount < 0 || variant.price.currency !== 'USD') review('CURRENCY_CHANGED', 'A current USD price is unavailable. Review the item again.');
+            if (variant.price.amount > max) review('OVER_BUDGET', 'The current item price is above your budget. Review it again.');
+            if (variant.price.amount !== item.expectedPrice.amount || variant.price.currency !== item.expectedPrice.currency) review('PRICE_CHANGED', 'The item price changed. Review the new price before checkout.');
+            const detailsHash = createHash('sha256').update(reviewContent(product, variant)).digest('hex');
+            if (detailsHash !== item.expectedDetailsHash) review('DETAILS_CHANGED', 'The product details changed. Review them against the recipient\'s requirements before checkout.');
+            refreshedMessages.push(...messages(data));
+            subtotal += variant.price.amount;
+          }
+          if (subtotal > max) review('OVER_BUDGET', 'The current gift set item subtotal exceeds your budget. Review it again.');
+          assertRefreshBudget();
           writeDispatched = true;
           const checkoutDocument = await client.callTool('create_checkout', {
-            shop: variant.seller.domain,
-            checkout: {line_items: [{item: {id: variant.id}, quantity: 1}], context: {address_country: 'US'}},
+            shop,
+            checkout: {line_items: items.map(item => ({item: {id: item.variantId}, quantity: 1})), context: {address_country: 'US'}},
             meta: {'idempotency-key': body.requestId},
           });
-          const checkout = safeCheckout(checkoutDocument, variant.id);
+          const checkout = safeCheckout(checkoutDocument, items.map(item => item.variantId));
           const combinedMessages = [...scrub(refreshedMessages), ...messages(checkout)];
           if (checkout.currency !== 'USD') combinedMessages.push({type: 'warning', code: 'checkout_currency_changed', content: 'The merchant checkout uses a different currency. Review its currency and full total before paying.'});
           result = {checkout, messages: combinedMessages, fetchedAt: new Date(now()).toISOString()};
+          for (const key of variantKeys) guardedVariants.delete(key);
         } catch (error) {
           if (!writeDispatched) {
+            for (const key of variantKeys) guardedVariants.delete(key);
             checkoutRequests.delete(requestKey);
             recentCheckouts.delete(recentKey);
           } else {

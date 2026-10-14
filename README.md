@@ -1,6 +1,6 @@
 # The Gift Edit
 
-A recipient-first gift concierge prototype: understand the recipient, search real merchant products through **Shop MCP**, explain matches, refine exclusions, choose an exact variant, and hand the buyer to the merchant to review and pay.
+A recipient-first gift concierge prototype: understand the recipient, search real merchant products through **Shop MCP**, explain matches, refine exclusions, choose exact variants for a gift set, and hand the buyer to the merchant to review and pay.
 
 **Live Shop commerce with transparent rules, plus an optional real model-driven tool loop through Vercel AI Gateway.** The agent code is implemented and mock-tested; a live model run has not yet been verified. Configuration alone is not proof of a working model. The app never pays, places an order, or handles payment credentials.
 
@@ -24,12 +24,13 @@ npm start
 
 ## The working flow
 
-1. Enter the recipient, occasion, item-price budget, likes, avoidances and a separate product query.
+1. Enter the recipient, occasion, item-price budget, likes, avoidances and a separate product query. Choose **Myself** for self-gifting: no recipient name is required, labels switch to you, and first-person interests are valid. Switching back restores other-recipient wording and requires fresh set review.
 2. In the default rules mode, the server calls anonymous Shop MCP `search_catalog`. Only the visible query, USD budget and explicit US demo-market context are sent, never the recipient name or private profile fields.
-3. The browser ranks the returned products with documented keyword rules. It excludes above-budget or non-USD prices, unavailable featured variants, explicit avoidances and products with no recipient-interest overlap. Empty results stay empty; no sample items are substituted.
+3. The browser ranks up to 10 returned primary gifts with documented keyword rules. Greeting cards, packaging and party add-ons are not main gifts unless the recipient interests or query explicitly request them. A soft value/diversity preference never creates a minimum spend or forces use of the full budget. It excludes above-budget or non-USD prices, unavailable featured variants, explicit avoidances and products with no recipient-interest overlap. Empty results stay empty; no sample items are substituted.
 4. Quick exclusion chips screen Clothes & shoes, Food & alcohol, Fragranced items, Requires a size choice, Large/heavy items and High-maintenance gifts. Confirmed evidence excludes; missing evidence is labeled “Can’t verify”, never guaranteed safe. Other things to avoid remains free text. “Not this one”, chips or category rejection reranks the current visible results without another network call. The page retains results only in its current state; no persistent catalog cache is created.
 5. “Refresh & choose” calls `get_product` and checks actual selected options, price, currency and stock. Changing an option refreshes again. Recipient checks are rerun locally.
-6. The buyer clicks **Create merchant checkout** after reviewing one exact item and merchant. The server refreshes again and rejects changed stock, price, currency, seller, options or reviewed public product details before creating checkout.
+5a. Optional **Must arrive by a date** is strict: current catalog data cannot verify destination-specific arrival, so unverified items are excluded. The date stays local. Stock or ships_to never establishes on-time delivery. Merchant dispatch/policy retrieval is not implemented; no checkout is created to obtain an estimate.
+6. Add exact refreshed variants to **Your gift set** (up to six unique variants, quantity one each). Item subtotal and remaining USD budget update immediately; over-budget additions and checkout are blocked. Changed preferences require a new search and review. Merchant groups have separate explicit checkout buttons; each request refreshes every exact item again and rejects changed stock, price, currency, seller, options or reviewed details before one multi-line checkout. Different merchants mean separate charges and deliveries, not one packaged gift set. Single-item checkout remains available separately.
 7. The app displays merchant warnings, legal links, labeled totals and the unchanged `continue_url`. The buyer clicks **Review & pay at merchant** and enters delivery/payment details there. This app never calls `complete_checkout`.
 
 Prices shown are item prices in the explicitly selected **US / USD demo market**, not the user's detected location. Tax and shipping are extra and may exceed the budget. The merchant determines final charges, fulfillment, terms and availability. A destination-country match is not a delivery-date promise.
@@ -51,15 +52,18 @@ Documentation: [Quickstart](https://shop.dev/docs/quickstart), [Search](https://
 ## Verification, honestly stated
 
 - Anonymous generic `search_catalog` and one exact `get_product` read succeeded through the implemented adapter on October 14, 2026.
-- Current tests cover ranking, exclusions, schemas, exact options, changing price/stock/currency/seller, duplicate clicks, warnings, safe URLs, privacy and uncertain writes.
+- Current tests cover primary-gift quality, up to 10 choices, set totals and duplicate/over-budget checks, exclusion evidence, exact options, changing price/stock/currency/seller, multi-line merchant grouping, overlapping uncertain writes, warnings, safe URLs and privacy.
 - **No real checkout was created during testing; checkout responses are synthetic mocks. No charge or order was made.**
-- The initial deployment at https://the-gift-edit-seven.vercel.app/ was verified in the cloud browser: real search, exact variant refresh, brief/copy, item exclusion/reset and low-budget results. An oversized hero image was found and corrected locally; the subsequent release remains subject to repository/deployment verification. Mobile and new agent/chip browser flows are not yet verified. The optional browser smoke suite is synthetic and never creates a merchant checkout.
+- The public app at https://the-gift-edit-seven.vercel.app/ was verified in the cloud browser: real search, exact variant refresh, brief/copy, item exclusion/reset and low-budget results. User-uploaded commit 789faae8a6953def8756242a5ac19fe8e11563da deployed successfully, and the hero layout and quick-exclusion behavior were verified. A bounded AI run initially failed; the user later reported a connected result, which has not yet been independently reproduced successfully. This new gift-set/quality release is local and needs deployment/browser verification. Mobile visual QA is pending.
 - See `docs/VERIFICATION.md` for the final test count and limits.
 
 ## Project map
 
 - `public/`: responsive navy/gold UI, browser-local recipient profile, original artwork inspiration.
 - `src/shop-catalog.mjs`: live result ranking, rendering helpers, constraints and briefs.
+- `src/delivery-deadline.mjs`: honest fail-closed delivery eligibility when supported arrival evidence is absent.
+- `src/gift-set.mjs`: exact-cent totals, six-variant limits and merchant grouping.
+- `src/gift-quality.mjs`: evidence-based main-gift/add-on classification and soft value preference.
 - `src/product-review.mjs`: canonical public details for pre-checkout drift detection.
 - `server/shop-mcp.mjs`: anonymous protocol adapter, strict tool allowlist and bounded responses.
 - `server/shop-api.mjs`: same-origin API, validation, refresh-before-checkout and safe merchant handoff.
@@ -72,7 +76,7 @@ Documentation: [Quickstart](https://shop.dev/docs/quickstart), [Search](https://
 
 ## Expression Atelier and pre-existing artwork
 
-Expression Atelier is untouched. Its homepage is only a separate, manual original-art exploration link. It does not receive the brief automatically and is not the checkout for Shop merchant products. Do not recreate another merchant's product design through Atelier.
+Expression Atelier is untouched. The UI offers a separate **Custom-made** path with a local copyable creative brief and its homepage as a manual original-art exploration link. It does not receive the brief automatically and is not the checkout for Shop merchant products. Do not recreate another merchant's product design through Atelier.
 
 The hero uses earlier original Arcade digital renders as clearly labeled inspiration, not current Shop products or physical sample photos. Eight original renders are retained with source hashes in `docs/asset-provenance.json`; no private franchise concept art is included. Their old candidate prices are unverified modeling scenarios in the retained offline modules, not live offers. Arcade supplier manufacturing billing is separate from customer checkout.
 
@@ -80,11 +84,11 @@ The hero uses earlier original Arcade digital renders as clearly labeled inspira
 
 The optional agent uses server-only native fetch to Vercel AI Gateway with model `openai/gpt-4.1-mini` by default (`AI_GATEWAY_MODEL` may select a supported model). It consumes only an already configured `AI_GATEWAY_API_KEY`, or an explicitly server-managed `VERCEL_OIDC_TOKEN`. It does not create keys, enable OIDC, or grant access. Credentials are never returned to the browser or written to the repository. This release does not trust any incoming OIDC header. Automatic request-time OIDC integration is not enabled because the plain Function runtime context has not been verified. A manually supplied server OIDC token can expire and has no automatic refresh here; the recommended release configuration is the existing authorized `AI_GATEWAY_API_KEY` secret. Future OIDC support should use Vercel's official helper and a verified trusted runtime, not raw request headers.
 
-Selecting **Use AI-guided search** explicitly shares the non-identifying interests, avoidances, occasion, budget, optional direction and quick exclusions with Vercel AI Gateway and its selected model. The recipient name field and relationship are omitted. Free text cannot be perfectly anonymized: do not enter names, contact details, credentials or sensitive information in shared fields. Rules mode remains model-free, and no model is called automatically on page load.
+Selecting **Use AI-guided search** explicitly shares the non-identifying interests, avoidances, occasion, budget, optional direction, quick exclusions and a boolean self-gifting context with Vercel AI Gateway and its selected model. The recipient name field and relationship are omitted. Free text cannot be perfectly anonymized: do not enter names, contact details, credentials or sensitive information in shared fields. Rules mode remains model-free, and no model is called automatically on page load.
 
-The model chooses `search_catalog` and `get_product` calls, receives bounded public catalog evidence, then selects observed, refreshed IDs. The loop stops at six model steps, eight read-only tools or 45 seconds. Budget, USD, availability, exact variants, dislikes and evidence-based exclusions remain code-enforced. Unsupported model prose is not shown as merchant fact; reasons use grounded product evidence. Checkout is **not** a model tool. A failed model run does not silently become an “AI” rules result.
+The model chooses `search_catalog` and `get_product` calls, receives bounded public catalog evidence, then selects observed, refreshed IDs. The loop stops at six model steps, 16 read-only tools (maximum three concurrent) or 45 seconds. Budget, USD, availability, exact variants, dislikes and evidence-based exclusions remain code-enforced. Unsupported model prose is not shown as merchant fact; reasons use grounded product evidence. Checkout is **not** a model tool. A failed model run does not silently become an “AI” rules result.
 
-Auth/credits are unverified until an actual user-requested run succeeds. No live inference has been made in implementation tests. Use the provider's supported secure setup; never paste credentials into chat, browser code, Git or screenshots. Public-scale deployment also needs distributed rate/cost controls; current process-local gates are only a demo safeguard.
+The user reported configuring Gateway access and receiving AI results. Independent successful end-to-end model/tool verification remains pending; local model tests use synthetic responses. Use the provider's supported secure setup; never paste credentials into chat, browser code, Git or screenshots. Public-scale deployment also needs distributed rate/cost controls; current process-local gates are only a demo safeguard.
 
 Official references: [Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok), [OIDC](https://vercel.com/docs/oidc), [Chat Completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/chat-completions), [Tool calling](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/tool-calling).
 

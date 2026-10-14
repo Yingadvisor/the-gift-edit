@@ -36,3 +36,14 @@ test('a single travel keyword is not claimed as multiple evidence signals',()=>{
   const r=recommend({...profile,budget:200,dislikes:'',likes:'They love travel.'});
   assert.ok(r.recommendations.every(rec=>rec.fitLabel==='One preference signal'));
 });
+
+test('Myself and explicit selfGift use first-person interests while other recipients keep giver guard',async()=>{
+ const {extractEvidence}=await import('../src/recommender.mjs');
+ for(const context of [{relationship:'Myself'},{selfGift:true}]){
+  const result=extractEvidence({...profile,...context,likes:'I love ocean walks but I dislike silk.'});
+  assert.match(result.positiveText,/ocean/);assert.match(result.negativeText,/silk/);
+ }
+ assert.doesNotMatch(extractEvidence({...profile,likes:'I love ocean walks.'}).positiveText,/ocean/);
+ const validated=validateProfile({...profile,selfGift:true});assert.equal(validated.profile.selfGift,true);
+ assert.equal(validateProfile({...profile,selfGift:'true'}).valid,false);
+});

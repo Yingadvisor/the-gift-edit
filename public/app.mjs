@@ -1,8 +1,8 @@
 import {reviewContent} from '/modules/product-review.mjs';
-import {validateShopProfile,rankShopProducts,EXCLUSION_FACTORS,assessExclusions,SHOP_ENGINE,formatMoney,safeHttpsUrl,productImage,selectedMatches,shopBrief} from '/modules/shop-catalog.mjs';
+import {validateShopProfile,rankShopProducts,EXCLUSION_FACTORS,assessExclusions,SHOP_ENGINE,formatMoney,safeHttpsUrl,productImage,selectedMatches,shopBrief,summarizeGiftSet,canAddToGiftSet,setItemKey} from '/modules/shop-catalog.mjs';
 const $=id=>document.getElementById(id);
 const form=$('gift-form');
-const state={profile:null,products:[],messages:[],excludedIds:[],excludedCategories:[],excludedFactors:[],result:null,agentResult:null,searchSeq:0,productSeq:0,active:null,checkoutAttempts:new Map()};
+const state={profile:null,products:[],messages:[],excludedIds:[],excludedCategories:[],excludedFactors:[],result:null,agentResult:null,searchSeq:0,productSeq:0,active:null,checkoutAttempts:new Map(),setItems:[],setAttempts:new Map(),setRevision:0,setBusy:false,preferencesDirty:false,activeSetAttempt:null};
 const el=(tag,className,text)=>{const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;};
 const button=(text,className,fn)=>{const b=el('button',className,text);b.type='button';b.addEventListener('click',fn);return b;};
 function external(text,url,className=''){const a=el('a',className,text);const valid=safeHttpsUrl(url);if(valid){a.href=valid;a.target='_blank';a.rel='noopener noreferrer';a.referrerPolicy='no-referrer';}else a.removeAttribute('href');return a;}
@@ -30,19 +30,19 @@ function renderFactorChips(){
 }
 function factorWarning(host,unknowns){if(unknowns?.length)host.append(el('p','factor-unknown',`Can’t verify: ${unknowns.map(x=>x.label).join(', ')}. The returned details are incomplete. Check with the merchant before buying.`));}
 function render(){
-  const host=$('results-content');host.replaceChildren();
+  renderGiftSet();const host=$('results-content');host.replaceChildren();
   if(!state.profile)return;
   const candidateProducts=state.agentResult?state.products.map(product=>{const chosen=state.agentResult.recommendations.find(rec=>rec.productId===product.id);const variant=product.variants?.find(item=>item.id===chosen?.variantId);return variant?{...product,variants:[variant,...product.variants.filter(item=>item!==variant)]}:null;}).filter(Boolean):state.products;
   const result=rankShopProducts(candidateProducts,state.profile,{...state,requireInterestEvidence:!state.agentResult});
   if(state.agentResult){const order=new Map(state.agentResult.recommendations.map((r,i)=>[`${r.productId}|${r.variantId}`,{...r,index:i}]));result.recommendations=result.recommendations.filter(rec=>order.has(`${rec.product.id}|${rec.variant.id}`)).sort((a,b)=>order.get(`${a.product.id}|${a.variant.id}`).index-order.get(`${b.product.id}|${b.variant.id}`).index);for(const rec of result.recommendations){const chosen=order.get(`${rec.product.id}|${rec.variant.id}`);rec.reasons=[chosen.reason,`The refreshed item price is ${formatMoney(rec.variant.price)}, before tax and shipping.`];}}
   state.result=result;
   $('engine-badge').textContent=state.agentResult?`AI-guided · ${state.agentResult.model} · Shop MCP`:'Shop MCP + rules · No AI model connected';
-  $('results-title').textContent=`A thoughtful edit for ${state.profile.recipient}.`;
+  $('results-title').textContent=state.profile.selfGift?'A thoughtful edit for you.':`A thoughtful edit for ${state.profile.recipient}.`;
   renderMessages(host,state.messages);
   if(state.agentResult){const trace=el('div','agent-trace');trace.append(el('strong','','Model tool use'),el('p','',`The model chose searches and product refreshes. ${state.agentResult.toolTrace?.length||0} read-only tool call(s) completed. IDs and purchase constraints were validated by code. Changing exclusions re-filters this selection locally; search again for a new model selection.`));host.append(trace);}
   for(const note of result.notices)host.append(el('p','result-notice',note));
-  if(state.excludedIds.length||state.excludedCategories.length||state.excludedFactors.length){const bar=el('div','exclusion-bar');bar.append(el('span','',`${state.excludedIds.length} item(s) and ${state.excludedCategories.length} category / categories excluded. ${state.excludedFactors.length} quick factor(s) selected.`),button('Reset exclusions','text-button',()=>{state.excludedIds=[];state.excludedCategories=[];state.excludedFactors=[];renderFactorChips();render();}));host.append(bar);}
-  if(!result.recommendations.length){const box=el('div','empty-state no-match');box.append(el('span','no-match-symbol','✧'),el('h4','','No honest match. And that’s okay.'),el('p','',state.products.length?'The returned items did not meet the USD item budget, availability, explicit avoidances and recipient-interest checks. Try a different product query; we won’t silently stretch your budget.':'Shop returned no products for this query. Try different product words or a budget that fits your plans.'));host.append(box);announce('No matching gifts remain.');return;}
+  if(state.excludedIds.length||state.excludedCategories.length||state.excludedFactors.length){const bar=el('div','exclusion-bar');bar.append(el('span','',`${state.excludedIds.length} item(s) and ${state.excludedCategories.length} category / categories excluded. ${state.excludedFactors.length} quick factor(s) selected.`),button('Reset these exclusions','text-button',()=>{state.excludedIds=[];state.excludedCategories=[];state.excludedFactors=[];renderFactorChips();render();}));host.append(bar);}
+  if(!result.recommendations.length){const box=el('div','empty-state no-match');box.append(el('span','no-match-symbol','✧'),el('h4','','No honest match. And that’s okay.'),el('p','',state.profile.arrivalDeadline?`Can’t verify delivery by ${state.profile.arrivalDeadline}. These catalog results do not include supported destination-specific arrival commitments, so none can qualify for your strict deadline. We won’t substitute stock status for delivery confirmation. Keep the deadline if it is essential; confirm delivery directly with a merchant before considering a purchase.`:state.products.length?'The returned items did not meet the USD item budget, availability, explicit avoidances and recipient-interest checks. Try a different product query; we won’t silently stretch your budget.':'Shop returned no products for this query. Try different product words or a budget that fits your plans.'));host.append(box);announce('No matching gifts remain.');return;}
   const summary=el('div','result-summary');summary.append(el('span','','✧'));const copy=el('div');copy.append(el('h4','',`${result.recommendations.length} real listings, with a reason for each.`),el('p','',`Shop catalog data · US / USD demo. Item prices are at or below $${state.profile.budget}. Shipping and tax are extra. ${state.agentResult?'AI-guided selection with deterministic purchase constraints.':'Ranking is rules-based, not AI.'}`));summary.append(copy);host.append(summary);
   result.recommendations.forEach((rec,index)=>host.append(card(rec,index)));announce(`${result.recommendations.length} matching listings. ${state.agentResult?'Model-guided selection, validated against live merchant data.':SHOP_ENGINE.disclosure}`);
 }
@@ -53,7 +53,7 @@ function card(rec,index){
   const body=el('div','card-body');body.append(el('p','card-artwork',v.seller.name||v.seller.domain),el('h4','',p.title));
   body.append(el('p','specifications',(v.options??[]).map(o=>`${o.name}: ${o.label}`).join(' · ')||'Featured variant'));
   body.append(el('span','fit-badge','Catalog match · exact options checked next'));
-  const reasons=el('ul','reason-list');for(const r of rec.reasons)reasons.append(el('li','',r));body.append(reasons);
+  const reasons=el('ul','reason-list');for(const r of rec.reasons)reasons.append(el('li','',state.profile.selfGift?r.replace('your recipient’s stated interest','your stated interest'):r));body.append(reasons);
   factorWarning(body,rec.factorUnknowns);
   const price=el('div','price-row');price.append(el('span','price-value',formatMoney(v.price)),el('span','','item price · shipping & tax extra'));body.append(price);
   body.append(el('p','merchant-domain',`Sold by ${v.seller.domain}`));
@@ -64,11 +64,11 @@ function card(rec,index){
 async function search(){
   const seq=++state.searchSeq;const useAgent=$('use-agent').checked===true;const input=Object.fromEntries(new FormData(form));const validation=validateShopProfile({...input,query:useAgent&&!String(input.query||'').trim()?'Find a thoughtful gift from these preferences':input.query});
   $('form-errors').hidden=validation.valid;$('form-errors').textContent=validation.errors.join(' ');state.products=[];state.messages=[];state.result=null;state.agentResult=null;$('engine-badge').textContent='Shop MCP + rules · No AI model connected';$('results-content').replaceChildren();
-  if(!validation.valid){state.profile=null;$('results-title').textContent='Update the details to search.';announce('Please correct the form. Previous results have been cleared.');return;}
-  state.profile=validation.profile;state.excludedIds=[];state.excludedCategories=[];
+  if(!validation.valid){for(const entry of state.setItems){entry.reviewed=false;entry.modelGuided=false;}setChanged();state.profile=null;renderGiftSet();$('results-title').textContent='Update the details to search.';announce('Please correct the form. Previous results have been cleared.');return;}
+  if(state.profile&&profileIdentity(state.profile)!==profileIdentity(validation.profile)){for(const entry of state.setItems){entry.reviewed=false;entry.modelGuided=false;}setChanged();}state.profile=validation.profile;state.preferencesDirty=false;state.excludedIds=[];state.excludedCategories=[];renderGiftSet();
   $('results-title').textContent='Finding real possibilities…';$('results-content').append(el('p','loading-state',useAgent?'The model is choosing searches and refreshing live Shop products. No checkout or payment tool is available to it.':'Searching Shop’s merchant catalog. No account or AI model is used.'));
   const submit=form.querySelector('button[type=submit]');submit.disabled=true;announce('Searching Shop.');
-  try{const data=useAgent?await api({consent:true,likes:state.profile.likes,dislikes:state.profile.dislikes,occasion:state.profile.occasion,budget:state.profile.budget,query:String(input.query||''),excludedFactors:state.excludedFactors},'/api/agent'):await api({action:'search',query:state.profile.query,budget:state.profile.budget});if(seq!==state.searchSeq)return;if(useAgent){if(data.modelConnected!==true||!Array.isArray(data.recommendations))throw new Error('The server did not confirm a successful model-guided run.');state.agentResult=data;}state.products=data.products??[];state.messages=data.messages??[];render();if(window.innerWidth<651)$('results-region').scrollIntoView({block:'start',behavior:'smooth'});}
+  try{const data=useAgent?await api({consent:true,likes:state.profile.likes,dislikes:state.profile.dislikes,occasion:state.profile.occasion,budget:state.profile.budget,query:String(input.query||''),excludedFactors:state.excludedFactors,...(state.profile.selfGift?{selfGift:true}:{})},'/api/agent'):await api({action:'search',query:state.profile.query,budget:state.profile.budget});if(seq!==state.searchSeq)return;if(useAgent){if(data.modelConnected!==true||!Array.isArray(data.recommendations))throw new Error('The server did not confirm a successful model-guided run.');state.agentResult=data;}state.products=data.products??[];state.messages=data.messages??[];render();if(window.innerWidth<651)$('results-region').scrollIntoView({block:'start',behavior:'smooth'});}
   catch(error){if(seq!==state.searchSeq)return;state.products=[];state.messages=[];$('results-title').textContent=useAgent?'The AI-guided run is unavailable.':'The live catalog is unavailable.';$('results-content').replaceChildren(el('p','result-notice',error.message),el('p','field-note',useAgent?'No rules result has been labeled as AI. Turn off AI-guided search to use transparent rules instead.':'No sample products have been substituted for live results. You can try the search again when the service is available.'));announce(error.message);}
   finally{if(seq===state.searchSeq)submit.disabled=false;}
 }
@@ -82,7 +82,7 @@ async function refreshProduct(selected){
   const old=$('create-checkout');if(old)old.disabled=true;
   try{const data=await api({action:'product',productId:active.rec.product.id,selected,budget:active.profile.budget});if(seq!==state.productSeq||active!==state.active)return;
     const p=data.product;const v=p?.variants?.[0];if(!p||!v)throw new Error('Shop did not return an exact product variant.');
-    active.product=p;active.variant=v;active.selected=selected;
+    active.product=p;active.variant=v;active.selected=selected;active.messages=data.messages??[];
     active.recipientMatch=rankShopProducts([p],active.profile,{...state,requireInterestEvidence:!active.modelGuided}).recommendations.length>0;
     active.valid=active.recipientMatch&&selectedMatches(selected,p,v)&&v.availability?.available===true&&v.price?.currency==='USD'&&Number.isSafeInteger(v.price?.amount)&&v.price.amount<=Math.round(active.profile.budget*100)&&v.price.amount>=0;
     renderProduct(data.messages??[]);$('product-status').textContent=active.valid?'Refreshed now. Review the exact option and item price below.':'This selection cannot be checked out here. It may have changed, be unavailable, exceed the budget, or differ from the requested options.';
@@ -100,23 +100,24 @@ function renderProduct(messages){
   }host.append(options);renderMessages(host,messages);
   if(!selectedMatches(active.selected,p,v))host.append(el('p','result-notice','Shop relaxed or changed the selected options. We will not silently accept that substitution. Choose a supported option or return to the results.'));
   if(!active.recipientMatch)host.append(el('p','result-notice','The refreshed product no longer passes the recipient-interest or avoidance checks. Choose a different gift.'));
+  const add=button('Add this variant to gift set +','button primary full-width',()=>addActiveToSet());add.id='add-to-set';const allowed=canAddToGiftSet(state.setItems,{product:p,variant:v,selected:active.selected},currentBudget());add.disabled=!active.valid||!allowed.allowed||state.preferencesDirty;host.append(add,el('p','field-note',allowed.allowed?'Choose several gifts, then review the set total and separate merchant checkouts.':allowed.reason));
   host.append(el('p','checkout-consent','Creating a checkout sends this variant and quantity 1 to the named merchant through Shop. It does not pay or place an order. Enter delivery and payment details only on the merchant page.'));
-  const b=button('Create merchant checkout →','button primary full-width',()=>createCheckout());b.id='create-checkout';b.disabled=!active.valid;host.append(b);
+  const b=button('Checkout this item separately →','button secondary full-width',()=>createCheckout());b.id='create-checkout';b.disabled=!active.valid;host.append(b);
   const key=`${p.id}|${v.id}`;if(state.checkoutAttempts.has(key)){b.disabled=true;renderCheckoutAttempt(state.checkoutAttempts.get(key));}
 }
 async function createCheckout(){
-  const active=state.active;if(!active?.valid||!active.product||!active.variant)return;
-  const key=`${active.product.id}|${active.variant.id}`;if(state.checkoutAttempts.has(key))return;
+  const active=state.active;if(!active?.valid||!active.product||!active.variant||state.preferencesDirty||!entryMatches({product:active.product,variant:active.variant,modelGuided:active.modelGuided}))return;
+  const key=`${active.product.id}|${active.variant.id}`;if(state.checkoutAttempts.has(key)||blockedVariantIds().has(active.variant.id))return;
   const snapshot={product:active.product,variant:active.variant,selected:[...active.selected],profile:{...active.profile}};
   const attempt={status:'pending',requestId:crypto.randomUUID(),active:snapshot};state.checkoutAttempts.set(key,attempt);$('create-checkout').disabled=true;renderCheckoutAttempt(attempt);
   try{const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(reviewContent(snapshot.product,snapshot.variant)));const expectedDetailsHash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');const data=await api({action:'checkout',productId:snapshot.product.id,selected:snapshot.selected,variantId:snapshot.variant.id,shop:snapshot.variant.seller.domain,budget:snapshot.profile.budget,expectedPrice:snapshot.variant.price,expectedDetailsHash,requestId:attempt.requestId,confirmed:true});attempt.status='ready';attempt.data=data.checkout?{...data.checkout,messages:data.messages??data.checkout.messages}:data;}
   catch(error){attempt.status='error';attempt.error=error.message;attempt.code=error.code;attempt.reviewRequired=error.reviewRequired;attempt.outcomeUncertain=error.outcomeUncertain;if(error.reviewRequired&&!error.outcomeUncertain)state.checkoutAttempts.delete(key);}
   if(state.active===active&&`${active.product?.id}|${active.variant?.id}`===key)renderCheckoutAttempt(attempt);
 }
-function renderCheckoutAttempt(attempt){
-  const host=$('checkout-result');host.replaceChildren();
+function renderCheckoutAttempt(attempt,host=$('checkout-result')){
+  host.replaceChildren();
   if(attempt.status==='pending'){host.append(el('p','product-status','Refreshing once more and preparing your merchant checkout…'));return;}
-  if(attempt.status==='error'){host.append(el('p','result-notice',attempt.error),el('p','field-note','No payment was made by this app. We will not automatically repeat an uncertain checkout request.'));if(attempt.reviewRequired&&!attempt.outcomeUncertain)host.append(button('Refresh and review changes','button secondary',()=>refreshProduct(state.active.selected)));return;}
+  if(attempt.status==='error'){host.append(el('p','result-notice',attempt.error),el('p','field-note','No payment was made by this app. We will not automatically repeat an uncertain checkout request.'));if(attempt.reviewRequired&&!attempt.outcomeUncertain)host.append(button('Refresh and review changes','button secondary',()=>attempt.setItems?refreshGiftSet():refreshProduct(state.active.selected)));return;}
   const d=attempt.data;host.append(el('h3','checkout-ready','Your merchant checkout'),el('p','field-note',`Status: ${d.status||'not supplied'}. Review the final total and all merchant terms before paying.`));
   for(const item of d.line_items??[]){const line=el('div','checkout-line');line.append(el('strong','',item.item?.title||attempt.active.product.title),el('span','',`Quantity: ${item.quantity??1}`));host.append(line);}
   renderMessages(host,d.messages);
@@ -125,13 +126,80 @@ function renderCheckoutAttempt(attempt){
   if(safeHttpsUrl(d.continue_url))host.append(external('Review & pay at merchant ↗',d.continue_url,'button primary full-width'));else host.append(el('p','result-notice','The merchant did not return a usable secure checkout link. Do not assume a checkout or payment is complete.'));
   host.append(el('p','field-note','You have not paid through this app. The merchant page is where you review delivery, final charges and payment.'));
 }
+
+function updateRelationshipUI(restoreRecipient=true){
+  const self=$('relationship').value==='Myself';const recipient=$('recipient');
+  if(self&&!state.selfMode){state.otherRecipientValue=recipient.value??'';recipient.value='You';}
+  if(!self&&state.selfMode&&restoreRecipient)recipient.value=state.otherRecipientValue??'';
+  state.selfMode=self;recipient.disabled=self;recipient.required=!self;
+  $('recipient-label').textContent=self?'This one is for you':'Who is the gift for?';
+  $('likes-label').textContent=self?'What do you love?':'What do they love?';
+  $('profile-heading').textContent=self?'A few things about you':'A few things about them';
+  $('workspace-title').textContent=self?'What would you love?':'Who are we celebrating?';
+  $('hero-gift-action').textContent=self?'Find your gift →':'Find their gift →';
+  if(!state.profile)$('results-title').textContent=self?'Your next favorite thing.':'Their next favorite thing.';
+  $('likes-note').textContent=self?'Tell us about your own interests. First-person statements like “I love coffee” are welcome.':'Tell us about the recipient, not your own taste. We match only the interests you actually mention.';
+  $('likes').placeholder=self?'I love slow mornings, specialty coffee, and gardening.':'They love ocean walks, collecting shells, and hosting friends for dinner.';
+}
+function profileIdentity(profile){return JSON.stringify([profile?.recipient,profile?.likes,profile?.dislikes,profile?.occasion,profile?.relationship,profile?.arrivalDeadline]);}
+function currentBudget(){const value=$('budget').value;return value===undefined?state.profile?.budget:Number(value);}
+function moneyCents(amount){return amount===null||amount===undefined?'Unavailable':formatMoney({amount,currency:'USD'});}
+async function detailsHash(product,variant){const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(reviewContent(product,variant)));return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');}
+function entryMatches(entry){if(!state.profile)return false;return rankShopProducts([{...entry.product,variants:[entry.variant]}],{...state.profile,budget:currentBudget()},{...state,requireInterestEvidence:!entry.modelGuided}).recommendations.length>0;}
+function setChanged(){++state.setRevision;state.activeSetAttempt=null;$('set-checkout-dialog').close();}
+function groupKey(group){return JSON.stringify([group.shop,...group.items.map(setItemKey).sort()]);}
+function blockedVariantIds(){const ids=new Set();for(const attempt of state.setAttempts.values())if(attempt.status!=='error'||attempt.outcomeUncertain||!attempt.reviewRequired)for(const item of attempt.setItems)ids.add(item.variant.id);for(const attempt of state.checkoutAttempts.values())if(attempt.status!=='error'||attempt.outcomeUncertain||!attempt.reviewRequired)ids.add(attempt.active.variant.id);return ids;}
+function setSummary(){const summary=summarizeGiftSet(state.setItems,currentBudget());if(state.preferencesDirty){summary.valid=false;summary.problems.push('Preferences changed. Search again, then refresh and review your set.');}for(const item of state.setItems)if(!entryMatches(item)){summary.valid=false;summary.problems.push(`${item.product.title} no longer passes the current recipient or exclusion checks. Remove it or update your search.`);}return summary;}
+function renderGiftSet(){
+  const stamp=JSON.stringify([state.excludedIds,state.excludedCategories,state.excludedFactors]);if(state.constraintStamp!==stamp){state.constraintStamp=stamp;setChanged();}
+  const host=$('gift-set-content');host.replaceChildren();const summary=setSummary();
+  $('gift-set-count').textContent=`${state.setItems.length} / 6 gifts`;
+  if(!state.setItems.length){host.append(el('p','field-note','Build a thoughtful combination. Refresh a listing, choose the exact variant, then add it here. Up to six different variants, one of each.'));return;}
+  for(const item of state.setItems){const row=el('div','set-item');const image=productImage(item.product,item.variant);if(image){const img=el('img','set-thumb');img.src=image.url;img.alt=image.alt;img.referrerPolicy='no-referrer';row.append(img);}const copy=el('div','set-item-copy');copy.append(el('strong','',item.product.title),el('p','field-note',`${item.variant.seller.domain} · ${(item.selected??[]).map(x=>x.label).join(' / ')||'Featured variant'} · Quantity 1`),el('span','',moneyCents(item.variant.price?.amount)));factorWarning(copy,assessExclusions(item.product,item.variant,state.excludedFactors).unknown);renderMessages(copy,item.messages??[]);row.append(copy,button('Remove','text-button',()=>{state.setItems=state.setItems.filter(x=>setItemKey(x)!==setItemKey(item));setChanged();renderGiftSet();}));host.append(row);}
+  const totals=el('div','set-totals');totals.append(el('strong','',`Item subtotal ${moneyCents(summary.subtotal)}`),el('span',summary.overBudget?'over-budget':'',summary.overBudget?`${moneyCents(-summary.remaining)} over budget`:`${moneyCents(summary.remaining)} remaining for items`));host.append(totals);
+  host.append(el('p','field-note','Shipping and tax are extra and may exceed your budget. Different merchants mean separate checkouts and deliveries, not one packaged gift set.'));
+  for(const issue of [...new Set(summary.problems)])host.append(el('p','set-problem',issue));
+  const refresh=button(state.setBusy?'Refreshing set…':'Refresh set & review details','button secondary full-width',()=>refreshGiftSet());refresh.disabled=state.setBusy||state.preferencesDirty;host.append(refresh);
+  const blocked=blockedVariantIds();
+  for(const group of summary.groups){const section=el('div','set-merchant');section.append(el('strong','',`${group.merchantName} · ${moneyCents(group.subtotal)}`),el('p','field-note',`${group.items.length} selected item(s) · ${group.shop}`));const key=groupKey(group);const attempt=state.setAttempts.get(key);if(attempt){section.append(button(attempt.status==='ready'?'Review existing merchant checkout':'View checkout request status','button secondary full-width',()=>showSetAttempt(attempt)));}else{const b=button(`Create checkout for ${group.merchantName} →`,'button primary full-width',()=>createSetCheckout(group.shop));b.disabled=!summary.valid||state.setBusy||group.items.some(x=>blocked.has(x.variant.id));section.append(b);if(group.items.some(x=>blocked.has(x.variant.id)))section.append(el('p','field-note','A checkout request already covers one of these variants. Review its status; do not create an overlapping request.'));}host.append(section);}
+}
+async function addActiveToSet(){
+  const active=state.active;if(!active?.valid||state.preferencesDirty||!entryMatches({product:active.product,variant:active.variant,modelGuided:active.modelGuided}))return;
+  const entry={product:active.product,variant:active.variant,selected:[...active.selected],reviewed:true,modelGuided:active.modelGuided,messages:active.messages??[]};const revision=state.setRevision;
+  entry.detailsHash=await detailsHash(entry.product,entry.variant);if(state.active!==active||revision!==state.setRevision||!active.valid||active.variant!==entry.variant||state.preferencesDirty)return;
+  const allowed=canAddToGiftSet(state.setItems,entry,currentBudget());if(!allowed.allowed){$('product-status').textContent=allowed.reason;return;}
+  state.setItems.push(entry);setChanged();renderGiftSet();$('product-dialog').close();$('gift-set-panel').scrollIntoView({block:'nearest',behavior:'smooth'});announce(`${entry.product.title} added to your gift set. No checkout was created.`);
+}
+async function refreshGiftSet(){
+  if(state.setBusy||state.preferencesDirty||!state.setItems.length)return;const revision=state.setRevision;const snapshot=[...state.setItems];state.setBusy=true;renderGiftSet();
+  const refreshed=[];
+  try{for(const item of snapshot){try{const data=await api({action:'product',productId:item.product.id,selected:item.selected,budget:currentBudget()});const product=data.product;const variant=product?.variants?.[0];if(!product||product.id!==item.product.id||variant?.id!==item.variant.id||variant?.seller?.domain!==item.variant.seller.domain||!selectedMatches(item.selected,product,variant))throw new Error('The merchant changed this exact selection.');const next={...item,product,variant,reviewed:true};if(!entryMatches(next))throw new Error('This gift no longer passes the current constraints.');next.detailsHash=await detailsHash(product,variant);next.messages=data.messages??[];refreshed.push(next);}catch{refreshed.push({...item,reviewed:false,detailsHash:null});}}if(revision===state.setRevision){state.setItems=refreshed;setChanged();announce('Gift set refreshed. Review current prices, options and notices before creating a merchant checkout.');}}
+  finally{state.setBusy=false;renderGiftSet();}
+}
+function showSetAttempt(attempt){state.activeSetAttempt=attempt;$('set-checkout-title').textContent=`Merchant checkout · ${attempt.shop}`;renderCheckoutAttempt(attempt,$('set-checkout-result'));$('set-checkout-dialog').showModal();}
+async function createSetCheckout(shop){
+  const summary=setSummary();if(!summary.valid||state.setBusy)return;const group=summary.groups.find(x=>x.shop===shop);if(!group)return;const key=groupKey(group);if(state.setAttempts.has(key)){showSetAttempt(state.setAttempts.get(key));return;}const blocked=blockedVariantIds();if(group.items.some(x=>blocked.has(x.variant.id)))return;
+  const revision=state.setRevision;const items=group.items.map(x=>({...x,selected:x.selected.map(o=>({...o}))}));const attempt={status:'pending',requestId:crypto.randomUUID(),shop,setItems:items,active:{product:{title:'Selected gift set'}}};state.setAttempts.set(key,attempt);showSetAttempt(attempt);renderGiftSet();
+  try{const data=await api({action:'checkout_set',items:items.map(item=>({productId:item.product.id,selected:item.selected,variantId:item.variant.id,shop,expectedPrice:item.variant.price,expectedDetailsHash:item.detailsHash})),budget:currentBudget(),requestId:attempt.requestId,confirmed:true});attempt.status='ready';attempt.data=data.checkout?{...data.checkout,messages:data.messages??data.checkout.messages}:data;}
+  catch(error){attempt.status='error';attempt.error=error.message;attempt.code=error.code;attempt.reviewRequired=error.reviewRequired;attempt.outcomeUncertain=error.outcomeUncertain;if(error.reviewRequired&&!error.outcomeUncertain)state.setAttempts.delete(key);}
+  if(revision===state.setRevision&&state.activeSetAttempt===attempt)renderCheckoutAttempt(attempt,$('set-checkout-result'));renderGiftSet();
+}
+
 form.addEventListener('submit',e=>{e.preventDefault();search();});
-$('try-example').addEventListener('click',()=>{const values={recipient:'Alex',relationship:'Friend',occasion:'Thank you',budget:'75',likes:'They love ocean walks, collecting shells, and hosting friends for dinner.',query:'ocean gifts for hosting',dislikes:'Silk and pillows'};Object.entries(values).forEach(([k,v])=>form.elements.namedItem(k).value=v);form.requestSubmit();});
+$('try-example').addEventListener('click',()=>{const values={recipient:'Alex',relationship:'Friend',occasion:'Thank you',budget:'75',likes:'They love ocean walks, collecting shells, and hosting friends for dinner.',query:'ocean gifts for hosting',dislikes:'Silk and pillows'};Object.entries(values).forEach(([k,v])=>form.elements.namedItem(k).value=v);updateRelationshipUI(false);form.requestSubmit();});
+$('custom-brief').addEventListener('click',()=>{const input=Object.fromEntries(new FormData(form));const checked=validateShopProfile({...input,query:String(input.query||'').trim()||'Original custom gift concept'});if(!checked.valid){$('form-errors').hidden=false;$('form-errors').textContent=checked.errors.join(' ');$('gift-form').scrollIntoView({block:'start',behavior:'smooth'});return;}const p=checked.profile;$('brief-text').value=['CUSTOM GIFT BRIEF · THE GIFT EDIT',`Recipient: ${p.recipient}`,`Occasion: ${p.occasion}`,`Recipient likes: ${p.likes}`,`Avoid: ${p.dislikes||'None stated'}`,`Quick exclusions: ${EXCLUSION_FACTORS.filter(f=>state.excludedFactors.includes(f.id)).map(f=>f.label).join(', ')||'None selected'}`,`Planning budget: ${p.budget} USD, not a custom quote. Shipping and tax extra.`,`Must arrive by: ${p.arrivalDeadline||'Not specified'}. Custom manufacturing and delivery are not verified; no date promise.`, 'Explore an original-art concept at https://expressionatelier.vercel.app/', 'Manual handoff only. No automatic brief ingestion, order, stock, delivery or price promise. Use original artwork you have rights to; do not recreate merchant designs.'].join('\n');$('copy-status').textContent='';$('copy-brief').textContent='Copy brief ↗';$('brief-dialog').showModal();});
 $('close-brief').addEventListener('click',()=>$('brief-dialog').close());
 $('close-product').addEventListener('click',()=>$('product-dialog').close());
 $('product-dialog').addEventListener('close',()=>{++state.productSeq;state.active?.opener?.focus();});
-for(const id of ['brief-dialog','product-dialog'])$(id).addEventListener('click',event=>{if(event.target===$(id)){const r=$(id).getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)$(id).close();}});
+$('close-set-checkout').addEventListener('click',()=>$('set-checkout-dialog').close());
+$('relationship').addEventListener('change',()=>{updateRelationshipUI();state.preferencesDirty=true;for(const entry of state.setItems){entry.reviewed=false;entry.modelGuided=false;}setChanged();renderGiftSet();});
+$('must-arrive').addEventListener('change',()=>{$('arrival-deadline').disabled=!$('must-arrive').checked;state.preferencesDirty=true;for(const entry of state.setItems)entry.reviewed=false;setChanged();renderGiftSet();});
+$('budget').addEventListener('input',()=>{setChanged();renderGiftSet();});
+form.addEventListener('input',event=>{if(['recipient','relationship','occasion','likes','dislikes','must-arrive','arrival-deadline'].includes(event.target?.id)){state.preferencesDirty=true;for(const entry of state.setItems)entry.reviewed=false;setChanged();renderGiftSet();}});
+for(const id of ['brief-dialog','product-dialog','set-checkout-dialog'])$(id).addEventListener('click',event=>{if(event.target===$(id)){const r=$(id).getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)$(id).close();}});
 $('copy-brief').addEventListener('click',async()=>{try{if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');await navigator.clipboard.writeText($('brief-text').value);$('copy-status').textContent='Copied. Your brief stays under your control.';$('copy-brief').textContent='Copied ✓';}catch{$('brief-text').focus();$('brief-text').select();$('copy-status').textContent='Clipboard access is unavailable. The brief is selected; use your device’s Copy command.';}});
 
 $('reset-factors').addEventListener('click',()=>{state.excludedFactors=[];renderFactorChips();render();});
 renderFactorChips();
+updateRelationshipUI();
+renderGiftSet();

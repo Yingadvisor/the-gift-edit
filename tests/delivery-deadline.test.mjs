@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {assessArrival,validArrivalDate} from '../src/delivery-deadline.mjs';
+import {rankShopProducts,validateShopProfile} from '../src/shop-catalog.mjs';
+const p={id:'p',title:'Ocean pottery mug',selected:[],variants:[{id:'v',options:[],price:{amount:4000,currency:'USD'},availability:{available:true},seller:{domain:'merchant.example'}}]};
+const profile={recipient:'Alex',likes:'They love ocean pottery.',dislikes:'',query:'ocean pottery',budget:100,arrivalDeadline:'2026-10-20'};
+test('strict arrival: available stock and ships_to are not delivery evidence',()=>{assert.equal(rankShopProducts([{...p,ships_to:['US']}],profile).recommendations.length,0);});
+test('strict arrival: arbitrary ETA and marketing shipping promises never qualify',()=>{for(const product of [p,{...p,estimated_delivery:'2026-10-18'},{...p,description:'Guaranteed next day shipping'},{...p,arrival_date:'2026-10-21'}])assert.equal(assessArrival(product,p.variants[0],profile).eligible,false);});
+test('strict arrival: without a deadline existing exact gift remains eligible',()=>{assert.equal(rankShopProducts([p],{...profile,arrivalDeadline:null}).recommendations.length,1);});
+test('strict arrival: requested checkbox requires real calendar date and stays in profile',()=>{assert.equal(validArrivalDate('2026-02-30'),false);assert.equal(validArrivalDate('2026-10-20'),true);assert.equal(validateShopProfile({...profile,mustArrive:'on',arrivalDeadline:''}).valid,false);assert.equal(validateShopProfile({...profile,mustArrive:'on'}).profile.arrivalDeadline,'2026-10-20');assert.equal(validateShopProfile({...profile,mustArrive:false}).profile.arrivalDeadline,null);});

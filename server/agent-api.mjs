@@ -1,6 +1,6 @@
 import {createHmac,randomBytes} from 'node:crypto';
 import {assertRequestHeaders,readBody} from './shop-api.mjs';
-import {runGiftAgent} from './gift-agent.mjs';
+import {runGiftAgent,GiftAgentError} from './gift-agent.mjs';
 
 const DEFAULT_MODEL='openai/gpt-4.1-mini';
 // Existing configured credentials only. Never create, persist, return or log tokens.
@@ -21,7 +21,7 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
       if(req.method==='GET')return send(200,{configured:Boolean(gatewayToken(req,env)),provider:'Vercel AI Gateway',model,modelConnected:false,disclosure:'Configuration presence is not a successful model connection. A user-requested model run must succeed first.'});
       assertRequestHeaders(req);
       const body=await readBody(req);
-      if(body.consent!==true||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
+      if(body.consent!==true||(body.selfGift!==undefined&&typeof body.selfGift!=='boolean')||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors','selfGift'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
       const token=gatewayToken(req,env);
       if(!token)return send(503,{error:{code:'MODEL_NOT_CONFIGURED',message:'The model is not configured. No AI recommendation was generated. You can use rules-based search instead.'}});
       const at=now();for(const[k,v]of rates)if(v.expires<=at)rates.delete(k);
@@ -37,6 +37,12 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
     }catch(error){
       // Error messages from upstream can contain credentials or raw payloads.
       // Only our own bounded public error text is allowed out of the core.
+      const coreCodes=new Set(['INVALID_AGENT_INPUT','AGENT_UNAVAILABLE','AGENT_AUTH','AGENT_CREDITS','AGENT_PROVIDER_RATE_LIMIT','AGENT_MODEL_UNAVAILABLE','AGENT_PROVIDER_REQUEST','AGENT_TIMEOUT','AGENT_LIMIT','AGENT_UPSTREAM','AGENT_INVALID_RESPONSE','AGENT_TOOL_NOT_ALLOWED']);
+      const stages=new Set(['model','tool_arguments','catalog_search','product_refresh','recommendation_validation']);
+      if(error instanceof GiftAgentError&&coreCodes.has(error.code)){
+        const stage=stages.has(error.stage)?error.stage:'input';
+        return send(Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:502,{error:{code:error.code,stage,message:`${new GiftAgentError(error.code).message} (${error.code}; stage: ${stage}) No checkout or payment was made.`}});
+      }
       const known=['INVALID_AGENT_INPUT','MODEL_NOT_CONFIGURED','AGENT_RATE_LIMIT','INVALID_REQUEST','INVALID_JSON','REQUEST_TOO_LARGE','ORIGIN_NOT_ALLOWED','METHOD_NOT_ALLOWED','UNSUPPORTED_MEDIA_TYPE'];
       const code=known.includes(error?.code)?error.code:'AGENT_UNAVAILABLE';
       return send(code==='AGENT_UNAVAILABLE'?502:Number.isInteger(error?.status)?error.status:400,{error:{code,message:code==='AGENT_UNAVAILABLE'?'The AI-guided run could not finish safely. No checkout or payment was made. Use rules-based search or try again later.':'The model request was rejected. Check the form and use this site directly.'}});

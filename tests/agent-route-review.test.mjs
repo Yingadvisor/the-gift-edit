@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {GiftAgentError} from '../server/gift-agent.mjs';
 import {createAgentHandler,gatewayToken} from '../server/agent-api.mjs';
 
 // These are synthetic route calls. No model, Shop service, credential service,
@@ -71,4 +72,16 @@ test('Agent route review: upstream failures expose no token, private payload or 
 test('Agent route review: development and local hosts never authorize request-header OIDC',()=>{
  for(const [host,env] of [['localhost:4173',{VERCEL:'1',VERCEL_ENV:'development'}],['localhost:4173',{VERCEL:'1',VERCEL_ENV:'production'}],['127.0.0.1',{VERCEL:'1',VERCEL_ENV:'production'}],['gift.local',{VERCEL:'1',VERCEL_ENV:'production'}],['gift.vercel.app',{VERCEL:'1',VERCEL_ENV:'development'}]])assert.equal(gatewayToken({headers:{host,'x-vercel-oidc-token':'CLIENT_TOKEN'}},env),null);
  assert.equal(gatewayToken({headers:{host:'gift.vercel.app','x-vercel-oidc-token':'UNVERIFIED_HEADER_TOKEN'}},{VERCEL:'1',VERCEL_ENV:'production'}),null);
+});
+
+test('Agent route diagnostic: trusted codes and stage are shown without mutable error messages',async()=>{
+ const handler=createAgentHandler({env:configured,runAgent:async()=>{const e=new GiftAgentError('AGENT_AUTH');e.stage='model';e.message='SYNTHETIC_TEST_TOKEN private prompt';throw e;}});const r=await invoke(handler);assert.equal(r.body.error.code,'AGENT_AUTH');assert.equal(r.body.error.stage,'model');assert.match(r.body.error.message,/Gateway rejected/);assert.doesNotMatch(r.text,/SYNTHETIC_TEST_TOKEN|private prompt/);
+});
+
+test('Agent route review: only a boolean selfGift context crosses the route, never identity',async()=>{
+ const seen=[];const handler=createAgentHandler({env:configured,runAgent:async input=>{seen.push(input);return {recommendations:[]};}});
+ assert.equal((await invoke(handler,{...input(),selfGift:true,likes:'I enjoy ocean walks.'})).status,200);
+ assert.equal(seen[0].selfGift,true);assert.equal(Object.hasOwn(seen[0],'recipient'),false);assert.equal(Object.hasOwn(seen[0],'relationship'),false);
+ for(const selfGift of ['true',1,null,{}])assert.equal((await invoke(handler,{...input(),selfGift})).status,400);
+ assert.equal(seen.length,1);
 });

@@ -12,9 +12,9 @@ Anonymous `search_catalog` → `get_product` exact selection refresh → explici
 4. A real checkout verification requires an explicit buyer action for a specific item/merchant. Do not generate merchant checkouts automatically during tests. Payment remains with the buyer.
 5. In-memory rate/duplicate guards are suitable for a small demo but not a distributed production guarantee. Add platform-wide rate protection and a durable idempotency design before public-scale use. No catalog, checkout access key or personal profile should go into logs or analytics.
 
-## Required to become an AI agent
+## Agent status
 
-The product still ranks using explicit rules. No LLM provider or credential is configured. Obtain the user's secure provider/credential choice, add a server-only adapter, preserve deterministic hard constraints, show model identity and run a bounded authorized live test before claiming AI reasoning/tool use. Never put a key in public assets, source control or chat.
+A bounded server-only Vercel Gateway agent now chooses actual Shop search/get_product tools. The user configured access and reported AI results; an independently observed successful end-to-end live run is still pending. Credentials remain server-only. This gift-set release is locally tested and must be uploaded/deployed before the user can test it publicly. Never put a key in public assets, source control or chat.
 
 ## Expression Atelier and Arcade
 
@@ -33,6 +33,12 @@ English keywords and bounded synonyms are not general language understanding. Am
 - [x] Explicit AI-mode data-sharing choice; recipient name field never sent.
 - [x] Unknown exclusion evidence disclosed; merchant facts grounded in actual returned data.
 - [ ] Provider credits/authentication confirmed by a real bounded model run.
-- [ ] Consolidated agent/chips/layout source release approved and deployed.
-- [ ] Public browser verification of the new release and mobile layout.
+- [x] Consolidated agent/chips/layout source release user-uploaded and deployed.
+- [ ] Gift-set/quality upgrade uploaded, deployed and verified.
+- [x] Public desktop verification of deployed layout and chips.
+- [ ] Gift-set browser flow and mobile layout verified.
 - [ ] Distributed rate/cost controls for production traffic.
+
+## Strict arrival-date limitation
+
+The new date control is local and fail-closed. Current Shop catalog tools do not document a destination-specific ETA, so available stock and ships_to cannot qualify a gift for a deadline. Merchant dispatch/shipping policy retrieval is not implemented. A future evidence resolver must account for manufacturing/handling, transit, destination, shipping method, business-day/cutoff semantics, source and freshness; unknown evidence must remain ineligible. Do not create a checkout automatically to obtain an estimate.

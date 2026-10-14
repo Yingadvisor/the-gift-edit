@@ -1,38 +1,37 @@
 # Verification record · 2026-10-14 UTC
 
-## Passed
+## Current local v0.4 gift-set release
 
 - Node.js 24.19.0; source supports Node.js 22+ with no runtime package dependencies.
-- `npm test`: 150 passing tests for the consolidated optional-agent, exclusion-chip and layout release, including independent rules and asynchronous UI regression suites.
-- Shop MCP `tools/list`: actual HTTP 200; current search_catalog, get_product and create_checkout input schemas inspected. Outgoing arguments validated against those Draft 2020-12 schemas.
-- One fresh anonymous generic search (`ocean home gifts`, US/USD, item cap 75 USD, limit 3) succeeded through the implemented adapter and returned three actual merchant products.
-- One actual get_product read for a returned optionless product succeeded with the exact product/variant identity, selected:[], USD price and availability. These reads sent no recipient profile, name, address, login or payment data.
-- Actual media shape confirmed as type:image, url, alt_text; description.plain is handled as inert text, even when it contains HTML-like markup.
-- Public-browser gift brief, Copy confirmation, item exclusion, reranking and reset passed. A low-budget live search showed only returned items at or below the chosen item-price ceiling. No checkout button was clicked.
-- Build completes without provider calls, keys or remote build services.
-- HTTP/static serving checks passed in the original local server. The updated API handler is covered by mocked request/response tests.
-- Exact byte hashes for all eight original artwork renders match their source pack. No private franchise art added.
-- Checkout mock tests cover exact options, merchant, price, currency, stock, details hash, recipient constraints, duplicate clicks, mandatory warnings, access-link preservation, private-field removal and uncertain writes.
-- UI mock tests cover stale product responses, delayed checkout A versus current variant B, local recipient avoidance recheck, private profile exclusion from API payload, uncertainty/no-repeat and combined warning visibility.
+- `npm test`: 232 passing tests, including independent UI/async review. Production build passed. All local tests use synthetic model and commerce responses; no real checkout is created.
+- Primary gifts: default target 10 distinct choices, aiming for at least 5 when real eligible results exist. Cards, wrapping, empty boxes and party add-ons are excluded as primary gifts unless explicitly requested. Fewer real choices are never padded with invented items. Soft value/category preferences never force spending the budget.
+- Set constraints: exact USD cents, six unique variants, quantity one each, aggregate budget checks, duplicate rejection, separate merchant groups, current exclusions, exact option review and public-details hashes.
+- Merchant-group API: refreshes every item before any write, rejects changed price/stock/currency/seller/options/details, exact returned line-item validation, preserves warnings and complete continue URL, strips private fields. The set refresh phase must finish within a 25-second pre-write budget or no checkout is dispatched. Pending/uncertain variant overlaps are blocked across both group and single-item requests.
+- UI regression tests cover add/remove without checkout, budget reduction, changed exclusions/preferences, stale refreshes, delayed checkout modal isolation, merchant notices, optionless products and lost recipient-provenance prevention.
+- Strict arrival deadline is a **local fail-closed control**, not completed delivery verification. Current documented Shop catalog responses have no supported destination-specific arrival ETA. Unknown or unsupported arrival evidence cannot qualify, even if stock is available or ships_to matches. No date, address or destination is sent by this control, and no checkout is created to obtain an estimate. Merchant dispatch/policy retrieval is not implemented.
+- Ready-made Shop gifts and Custom-made Expression Atelier are separate entry paths. Custom brief copying stays local; there is no automatic handoff, custom quote, stock, shipping or manufacturing promise.
+- Self-gifting: explicit Myself mode does not require a recipient name, accepts first-person interests only in that context, uses you-focused labels, and shares only a boolean context with the model. Other-recipient giver-preference guards remain.
+- Safe model diagnostics expose only allowlisted error code/stage and fixed text, never prompts, provider bodies, stacks or credentials.
+- This v0.4 release is locally prepared. Repository upload, deployment, public gift-set flow and mobile visual QA remain to be verified.
 
-## Not performed / not established
+## Previously verified live behavior
 
-- No real create_checkout call, cart, payment, order, Shop sign-in, Arcade billing test or manufacturing order was made. All checkout verification used clearly synthetic fixtures.
-- The optional Vercel Gateway model-driven tool loop is implemented and covered by synthetic tests. No real model inference or working provider credits/access has been verified. Rules mode remains model-free. New agent/chip release is not yet deployed.
-- Public desktop browser verification began at 19:11 UTC at https://the-gift-edit-seven.vercel.app/. The deployed app completed live generic-example search and exact variant refresh. An oversized original hero image was found and corrected locally by setting responsive image height. Prepared fix commit e10bb430ed910cf0642c06c7ad941cd62b03c68b was NOT on main at 19:14 UTC: the branch-update tool was canceled twice, and readback confirmed main remained at 61467bf8ac478d57874c7bf5f7efc662a837f6fb. Mobile visual verification remains pending. Earlier local Chromium and localhost routes were blocked or unavailable and were not retried.
-- scripts/browser_smoke.py is an optional synthetic browser suite. It intercepts all commerce requests and blocks external network calls, so it does not create real checkouts. It must still be run in a supported environment.
-- An earlier research-only generic search had an approval canceled with uncertain network execution. It was not treated as success or blindly repeated. The fresh successful search above was a separate approved implementation smoke test.
+- Anonymous Shop `tools/list` returned HTTP 200. The current search_catalog, get_product and create_checkout input schemas were inspected and arguments validated against them.
+- A fresh generic anonymous search and exact product/variant refresh succeeded through the implemented adapter on October 14. No recipient identity, address, login or payment data was sent.
+- Initial public deployment at https://the-gift-edit-seven.vercel.app/ completed real search, exact product refresh, gift brief/copy, exclusions/reset and low-budget results in the cloud browser.
+- User-uploaded commit 789faae8a6953def8756242a5ac19fe8e11563da at 20:01:44 UTC deployed successfully. Desktop hero layout correction and exclusion-chip behavior were verified publicly.
+- User configured Gateway access themselves and redeployed around 20:10 UTC. A bounded generic AI smoke run returned a safe failure. The user subsequently reported a connected run with greeting-card products. Successful model/tool output has not yet been independently reproduced; local agent tests use synthetic responses.
+- Original artwork file hashes match the source pack. Hero artwork is separate inspiration, not a live Shop catalog or physical sample.
 
-## Deployment and production caveats
+## Not performed / limits
 
-Initial full-source commit 61467bf8ac478d57874c7bf5f7efc662a837f6fb was successfully deployed by the user through Vercel at 19:05 UTC. Public frontend and deployed Shop search/get_product were observed in the cloud browser. Later fixes require their own deployment verification. In-memory rate/duplicate guards are not distributed production guarantees. Add platform-wide controls before public-scale traffic. No catalog responses, merchant images or checkout access links are persisted in this source tree.
+- No real create_checkout, payment, order, Shop sign-in, Arcade billing test or manufacturing order was performed. All checkout tests are mocks.
+- No credential was created, entered, printed or saved during implementation. Credentials configured by the user remain server-only.
+- No cached catalog, downloaded merchant image, checkout access URL or user profile is included in the repository.
+- Mobile visual QA and a public browser run of this gift-set release are pending. Earlier blocked local browser routes were not retried.
+- Process-local rate and duplicate guards are demo safeguards, not distributed production guarantees. Add platform-wide cost/rate control and durable idempotency before public-scale traffic.
+- `scripts/browser_smoke.py` is an optional synthetic browser suite. It intercepts commerce and blocks other network requests; it has not been run successfully in this environment.
 
-## Consolidated release review · approximately 19:24 UTC
+## Delivery sources checked
 
-- 150 tests and production build passed. Independent review checked consent, omitted identity fields, no automatic inference, no fake AI fallback, exact variants, exclusions, origin/body/rate gates and credential redaction.
-- Fixed review-content hash coverage for variant metadata and product options, exact model-selected variant presentation, and unrelated one-size accessory evidence.
-- Rejected all incoming request-header OIDC; only explicitly configured server credentials are consumed and a giver-only preference guard before model calls.
-- Existing authorized credential consumption only; no secret was created, entered or saved. No live model run.
-- This release remains local pending a fresh consolidated release approval and verified repository update. The prior canceled layout-only branch operations were not bypassed.
-
-- Final auth hardening: header provenance and plain-handler OIDC runtime support were not established by official sources, so automatic header-token use was removed before release. No secret setup was performed.
+[Shop search](https://shop.dev/docs/search), [Shop tools](https://shop.dev/docs/tools), [Shop Catalog API](https://shop.dev/docs/catalog-api), [Shopify Global Catalog extension](https://shopify.dev/docs/agents/catalog/global-catalog-extension), and [UCP Catalog specification](https://ucp.dev/latest/specification/shopping/catalog/). Destination hints and ships_to establish context/coverage, not an arrival commitment. Any future delivery evaluator needs verified dispatch, transit, destination, method, cutoffs, calendar semantics, source and freshness before stating an estimate; an estimate is not a guarantee.
