@@ -45,5 +45,52 @@
       "sha256": "d6a4d0d2e5a71166129d68abb1ec6ca26d414294dffd85d65fd691586461866d",
       "source_member": "product-images/ocean-reverie-pillow-arcade-preview.png"
     }
-  ]
+  ],
+  "flat_original_patterns": {
+    "source_library_file_id": "libfile_eaede7078d488191a42bb3df34542c3b",
+    "source_filename": "Arcade-Original-Artwork.zip",
+    "source_sha256": "4373ced80d902188441043e8caf2206d8fa891dd5c47dc4817ad1fd23dff7ff8",
+    "assets": [
+      {
+        "file": "public/assets/moonlit-botanica-original-pattern.png",
+        "source_member": "sources/moonlit-botanica.png",
+        "sha256": "d61bee0af76d084bff81a59379e0fdb7ada6a0288482e9fa83cdf3a3d3220cc8",
+        "dimensions": [
+          1254,
+          1254
+        ],
+        "modified": false
+      },
+      {
+        "file": "public/assets/celestial-voyager-original-pattern.png",
+        "source_member": "sources/celestial-voyager.png",
+        "sha256": "cc10a9dad97cf79fb9c01b7e3d454e238e54ab8f7f165426dfa89eb02c815308",
+        "dimensions": [
+          1254,
+          1254
+        ],
+        "modified": false
+      },
+      {
+        "file": "public/assets/ocean-reverie-original-pattern.png",
+        "source_member": "sources/ocean-reverie.png",
+        "sha256": "ee85b8f4333dbb377671143ccef20c378a3ae465cb407fd44425535d9caeb146",
+        "dimensions": [
+          1254,
+          1254
+        ],
+        "modified": false
+      },
+      {
+        "file": "public/assets/golden-passage-original-pattern.png",
+        "source_member": "sources/golden-passage.png",
+        "sha256": "b08085b65cf99f21dda744b03690daba51c786f03b9dff002c4a8c12bf3c5b18",
+        "dimensions": [
+          1254,
+          1254
+        ],
+        "modified": false
+      }
+    ]
+  }
 }

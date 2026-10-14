@@ -44,3 +44,9 @@
 - Release tests remain synthetic for model and checkout behavior. A successful live model/tool run must still be observed after deployment.
 
 - Around 20:57–21:03 UTC, simplified the input to optional expression followed by one submission, retained submitted context across the right-column modes, added actual bounded Shop cursor pagination, and prioritized exact named-theme retrieval over supplementary context. Rules mode now uses up to three focused generic-interest queries. These changes are locally tested, not yet publicly verified.
+
+## v0.5.1 scoped direct correction
+
+- Around 21:17–21:25 UTC, corrected empty-selection reporting and added allowlisted proposal/rejection counts without relaxing constraints. User requested expression chips below the form, separate audience/style/lifestyle, and relevant pattern-first custom choices. Four original flat artworks were retrieved from Arcade-Original-Artwork.zip, inspected and copied without modification; hashes are recorded in asset-provenance.json.
+- User explicitly authorized direct correction/release rather than another manual upload. A fresh main lease and non-force update are required; prior canceled unrelated ref writes are not retried.
+- Successful bounded live AI tool use was independently observed on the already-deployed v0.5 coffee/$100 case at 21:19:59 UTC. Checkout remains untested live.

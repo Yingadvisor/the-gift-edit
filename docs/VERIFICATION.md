@@ -1,9 +1,9 @@
 # Verification record · 2026-10-14 UTC
 
-## Current local v0.5 usability and model-repair release
+## Current v0.5.1 usability and diagnostic release
 
 - Node.js 24.19.0; source supports Node.js 22+ with no runtime package dependencies.
-- `npm test`: 307 passing tests, including independent UI/async review. Production build passed. All local tests use synthetic model and commerce responses; no real checkout is created.
+- `npm test`: 321 passing tests, including independent UI/async review. Production build passed. All local tests use synthetic model and commerce responses; no real checkout is created.
 - Primary gifts: default target 10 distinct choices, aiming for at least 5 when real eligible results exist. Cards, wrapping, empty boxes and party add-ons are excluded as primary gifts unless explicitly requested. Fewer real choices are never padded with invented items. Soft value/category preferences never force spending the budget.
 - Set constraints: exact USD cents, six unique variants, quantity one each, aggregate budget checks, duplicate rejection, separate merchant groups, current exclusions, exact option review and public-details hashes.
 - Merchant-group API: refreshes every item before any write, rejects changed price/stock/currency/seller/options/details, exact returned line-item validation, preserves warnings and complete continue URL, strips private fields. The set refresh phase must finish within a 25-second pre-write budget or no checkout is dispatched. Pending/uncertain variant overlaps are blocked across both group and single-item requests.
@@ -41,3 +41,11 @@
 ## Delivery sources checked
 
 [Shop search](https://shop.dev/docs/search), [Shop tools](https://shop.dev/docs/tools), [Shop Catalog API](https://shop.dev/docs/catalog-api), [Shopify Global Catalog extension](https://shopify.dev/docs/agents/catalog/global-catalog-extension), and [UCP Catalog specification](https://ucp.dev/latest/specification/shopping/catalog/). Destination hints and ships_to establish context/coverage, not an arrival commitment. Any future delivery evaluator needs verified dispatch, transit, destination, method, cutoffs, calendar semantics, source and freshness before stating an estimate; an estimate is not a guarantee.
+
+## v0.5.1 release check
+
+- v0.5 commit fdf7082dbeb0178113880c5295f4d153da3be502 deployed at 21:12:38 UTC; all 32 delta files matched the archive.
+- Independent normal cloud-browser AI run at 21:19:59 UTC: coffee, $100, Any audience/age, no exclusions or deadline. Model openai/gpt-4.1-mini completed 11 read-only calls, found 12 distinct products, refreshed 10, selected and displayed 9. No checkout/payment occurred.
+- A user screenshot showed 12 found, 10 refreshed, zero selected with three unknown selected factors. The old response cannot determine model-empty versus filtered proposals. New allowlisted diagnostic counts make that distinction; constraints are not weakened.
+- Expression chips plus free text moved below avoidances; Audience, Style and Lifestyle separated. Relevant Pattern / motif choices use four unchanged original artworks, then existing exact product prototypes. No product-type selector, irrelevant default recommendations or licensed-franchise substitution.
+- Current local full suite and build pass; direct release/deployment verification follows separately.

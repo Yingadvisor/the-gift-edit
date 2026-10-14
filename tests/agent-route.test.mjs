@@ -9,3 +9,9 @@ test('expression route accepts semantic text, rejects wrong types and identity f
  for(const expression of [null,1,{},'x'.repeat(401)])assert.equal((await invoke(handler,{...input,expression})).status,400);
  assert.equal((await invoke(handler,{...input,recipient:'Private Name'})).status,400);assert.equal(calls.length,1);
 });
+test('style/lifestyle route validates generic enums independently of audience',async()=>{
+ const calls=[];const handler=createAgentHandler({env:{AI_GATEWAY_API_KEY:'SYNTHETIC_TEST_TOKEN'},runAgent:async value=>{calls.push(value);return {recommendations:[]};}});
+ assert.equal((await invoke(handler,{...input,style:'natural',lifestyle:'public-service',audience:'any'})).status,200);assert.equal(calls[0].style,'natural');assert.equal(calls[0].lifestyle,'public-service');
+ for(const patch of [{style:'men'},{lifestyle:'women'},{lifestyle:123}])assert.equal((await invoke(handler,{...input,...patch})).status,400);
+ assert.equal(calls.length,1);
+});

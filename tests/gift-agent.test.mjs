@@ -265,3 +265,21 @@ test('retrieval priority: any nonempty primary query wins over model expression 
  assert.equal(h.shopCalls[0].args.catalog.query,'mechanical keyboards gifts');
  const empty=harness();await runGiftAgent({...profile,query:''},empty.options);assert.equal(empty.shopCalls[0].args.catalog.query,'ocean ceramic gifts');
 });
+test('selection diagnostics separate model empty from deterministic filtering without raw model text',async()=>{
+ const products=Array.from({length:12},(_,n)=>{const p=product();p.id=`gid://shopify/Product/diag${n}`;p.variants[0].id=`gid://shopify/ProductVariant/diag${n}`;return p;});
+ const refreshBatch={role:'assistant',tool_calls:products.slice(0,10).map((p,n)=>tool('get_product',{productId:p.id,selected:[]},n+2).tool_calls[0])};
+ const run=async recs=>{const replies=[search(),refreshBatch,{role:'assistant',content:JSON.stringify({recommendations:recs,summary:'PRIVATE_MODEL_SUMMARY'})}];return runGiftAgent(profile,{callModel:async()=>structuredClone(replies.shift()),callShop:async(name,args)=>name==='search_catalog'?{products}:{product:products.find(p=>p.id===args.catalog.id)}});};
+ const empty=await run([]);assert.deepEqual(empty.catalogCounts,{observed:12,refreshed:10,selected:0});assert.equal(empty.selectionDiagnostics.modelProposedCount,0);assert.equal(empty.selectionDiagnostics.zeroSelectionReason,'model_empty');
+ products[0].title='Ocean greeting card';products[1].variants[0].availability.available=false;products[2].variants[0].price.amount=6000;
+ const filtered=await run(products.slice(0,3).map(p=>({productId:p.id,variantId:p.variants[0].id,reason:'PRIVATE_MODEL_REASON'})));
+ assert.equal(filtered.selectionDiagnostics.modelProposedCount,3);assert.equal(filtered.selectionDiagnostics.acceptedCount,0);assert.equal(filtered.selectionDiagnostics.zeroSelectionReason,'model_filtered');
+ assert.equal(filtered.selectionDiagnostics.rejectionCounts.addon,1);assert.equal(filtered.selectionDiagnostics.rejectionCounts.stock,1);assert.equal(filtered.selectionDiagnostics.rejectionCounts.budget,1);assert.equal(Object.values(filtered.selectionDiagnostics.rejectionCounts).reduce((a,b)=>a+b,0),3);
+ assert.doesNotMatch(JSON.stringify(filtered),/PRIVATE_MODEL/);
+ const noCatalog=await runGiftAgent(profile,{callModel:(()=>{const replies=[search(),{role:'assistant',content:JSON.stringify({recommendations:[],summary:''})}];return async()=>replies.shift();})(),callShop:async()=>({products:[]})});assert.equal(noCatalog.selectionDiagnostics.zeroSelectionReason,'no_catalog');
+});
+test('style and lifestyle are separate secondary context, not query restrictions or audience',async()=>{
+ const h=harness();const out=await runGiftAgent({...profile,query:'ocean gifts',style:'minimalist',lifestyle:'healthcare'},h.options);
+ assert.equal(out.recommendations.length,1);assert.equal(h.shopCalls[0].args.catalog.query,'ocean gifts');
+ const sent=JSON.parse(h.modelCalls[0].messages[1].content);assert.equal(sent.style,'minimalist');assert.equal(sent.lifestyle,'healthcare');assert.equal(sent.audience,'any');
+ for(const delta of [{style:'women'},{lifestyle:'men'},{style:1},{lifestyle:{job:'doctor'}}])await rejectsCode(()=>runGiftAgent({...profile,...delta},harness().options),'INVALID_AGENT_INPUT');
+});

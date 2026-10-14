@@ -2,7 +2,7 @@
 
 A recipient-first gift concierge prototype: understand the recipient, search real merchant products through **Shop MCP**, explain matches, refine exclusions, choose exact variants for a gift set, and hand the buyer to the merchant to review and pay.
 
-**Live Shop commerce with transparent rules, plus an optional real model-driven tool loop through Vercel AI Gateway.** The agent code is implemented and mock-tested; a live model run has not yet been verified. Configuration alone is not proof of a working model. The app never pays, places an order, or handles payment credentials.
+**Live Shop commerce with transparent rules, plus an optional real model-driven tool loop through Vercel AI Gateway.** The agent code is implemented and mock-tested; a live coffee/$100 model run was independently verified on October 14 at 21:19:59 UTC: 12 catalog listings found, 10 refreshed and 9 recommendations returned. Configuration alone is not proof of a working model. The app never pays, places an order, or handles payment credentials.
 
 ## Run locally
 
@@ -24,8 +24,8 @@ npm start
 
 ## The working flow
 
-1. Start with optional **What would you like to express?**, then enter the recipient, occasion, item-price budget, likes and avoidances. There is no separate product-query field. Choose **Myself** for self-gifting: no recipient name is required, labels switch to you, and first-person interests are valid. Switching back restores other-recipient wording and requires fresh set review.
-2. Choose Ready-made or Custom-made in the same right-hand workspace. The form, results and selections stay in this tab when switching. After **Find gifts**, Custom-made shows a compact product-type selector and four original motif cards; selecting a motif updates the concept inline, with no second form or required brief-copy step. Switching modes reuses the submitted details. Unsubmitted edits do not silently change the displayed custom brief. Expression-based motif suggestions are interpretations within these original designs, not universal cultural claims.
+1. Enter the recipient, occasion, item-price budget, likes and avoidances, then optionally choose expression chips or add your own meaning near the submit button. Audience, aesthetic Style and Lifestyle are separate fields. There is no separate product-query field. Choose **Myself** for self-gifting: no recipient name is required, labels switch to you, and first-person interests are valid. Switching back restores other-recipient wording and requires fresh set review.
+2. Choose Ready-made or Custom-made in the same right-hand workspace. The form, results and selections stay in this tab when switching. After **Find gifts**, Custom-made shows only relevant original Pattern / motif choices using actual flat artwork. Selecting a pattern shows its existing product prototypes, without a product-type selector. No original match produces an honest empty state with separate opt-in browsing; franchise names do not turn generic art into licensed designs. Switching modes reuses the submitted details. Unsubmitted edits do not silently change the displayed custom brief. Expression-based motif suggestions are interpretations within these original designs, not universal cultural claims.
 3. In the default rules mode, the server calls anonymous Shop MCP `search_catalog`. Only automatically extracted generic interest queries, USD budget and explicit US demo-market context are sent, never the recipient name field or raw profile prose. The primary extracted interest is searched exactly first; named themes are not burdened with demographic/occasion modifiers. Short novel product-interest phrases are supported beyond the known keyword list. Rules-mode language aliases are limited, not universal translation; AI mode can interpret broader wording when it is configured and consented. Other interests generate up to three focused searches, not one restrictive combined query.
 4. Optional generic adult age bands and intended audiences (Any/Men/Women/Unisex) reach both query and model context. Only explicit merchandising/age evidence excludes a result; unknown suitability is disclosed, and necklaces are not gender-banned. Literal Star Wars or quoted-theme requests must be evidenced in merchant text, including negation screening.
 
@@ -100,3 +100,7 @@ Official references: [Gateway authentication](https://vercel.com/docs/ai-gateway
 See `docs/BUILD-PROVENANCE.md` for the initial build and Shop pivot timestamps. Some code and original assets predate any unverified official event start. Event eligibility has not been established; disclose pre-existing material and follow organizer rules. Do not rewrite history to imply later creation.
 
 No license has been assigned to code or artwork. Public visibility alone does not grant third-party reuse rights. No existing Expression Atelier source or Git history is imported.
+
+## v0.5.1 diagnostic correction
+
+Model proposals, accepted results and deterministic rejection counts are distinct. An empty shortlist never claims the upstream catalog was empty when products were found. Existing budget, variant, exclusion and relevance checks remain unchanged. The four flat artworks are unmodified, hash-verified pre-existing original source files; no new generation or licensing claim is made.

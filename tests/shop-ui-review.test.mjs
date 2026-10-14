@@ -116,7 +116,7 @@ test('Agent UI review: explicit AI search sends only consented preference fields
   h.get('use-agent').checked=true;
   h.run("state.excludedFactors=['fragrance']");
   await h.run('search()');
-  assert.deepEqual(h.requests,[{url:'/api/agent',payload:{consent:true,likes:profile.likes,dislikes:profile.dislikes,occasion:profile.occasion,budget:profile.budget,query:'ocean gifts',expression:'',excludedFactors:['fragrance']}}]);
+  assert.deepEqual(h.requests,[{url:'/api/agent',payload:{consent:true,likes:profile.likes,dislikes:profile.dislikes,occasion:profile.occasion,budget:profile.budget,query:'ocean gifts',expression:'',style:'any',lifestyle:'any',excludedFactors:['fragrance']}}]);
   assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|Friend|recipient|relationship/);
 });
 
@@ -536,9 +536,9 @@ test('More options UI review: additional AI-mode pages are visibly rules-only an
   assert.match(h.get('brief-text').value,/Ranking is rules-based, not an LLM recommendation/);assert.doesNotMatch(h.get('brief-text').value,/AI-guided selection via/);
 });
 
-test('Expression UI review: optional meaning appears first and Find gifts replaces the exposed technical query',async()=>{
+test('Expression UI review: optional clickable meaning appears below avoidances and keeps optional free text',async()=>{
   const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');const form=html.match(/<form id="gift-form"[\s\S]*?<\/form>/)[0];
-  assert.ok(form.indexOf('id="expression"')<form.indexOf('id="recipient"'));assert.doesNotMatch(form,/id="query"|name="query"/);
+  assert.ok(form.indexOf('id="expression-chips"')>form.indexOf('id="dislikes"'));assert.ok(form.indexOf('id="expression"')>form.indexOf('id="expression-chips"'));assert.ok(form.indexOf('id="expression"')<form.indexOf('type="submit"'));assert.doesNotMatch(form,/id="query"|name="query"/);
   const expression=form.match(/<input[^>]*id="expression"[^>]*>/)[0];assert.doesNotMatch(expression,/required/);assert.match(form,/>Find gifts /);
 });
 
@@ -547,15 +547,17 @@ test('Expression UI review: real custom module survives empty-state entry and ch
   h.run("setGiftMode('custom')");assert.equal(h.get('custom-empty').hidden,false);assert.equal(h.get('custom-panel').hidden,true);
   h.get('gift-form').values={...profile,expression:'Protection and care'};h.get('gift-form').listeners.submit({preventDefault(){}});
   assert.equal(h.get('custom-empty').hidden,true);assert.equal(h.get('custom-panel').hidden,false);
-  const panel=h.get('custom-panel');assert.ok(descendants(panel).some(n=>n['aria-label']==='Choose an original motif'));
-  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: Protection and care.')));
+  const panel=h.get('custom-panel');assert.ok(descendants(panel).some(n=>n['aria-label']==='Relevant original product concepts'));
+  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: Protection and care.')));
   h.get('gift-form').values.expression='New beginnings';h.get('gift-form').listeners.input({target:{id:'expression'}});
-  descendants(panel).find(n=>n['aria-label']==='Ocean Reverie, shown on pillow').listeners.click();
-  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: Protection and care.')));
+  assert.ok(!descendants(panel).some(n=>n.tagName==='button'&&String(n['aria-label']).startsWith('Ocean Reverie ·')));
+  const pattern=descendants(panel).find(n=>n['aria-label']==='Pattern: Ocean Reverie');assert.ok(pattern);assert.ok(descendants(pattern).some(n=>n.tagName==='img'&&n.alt==='Ocean Reverie original artwork'));pattern.listeners.click();
+  descendants(panel).find(n=>n.tagName==='button'&&n['aria-label']==='Ocean Reverie · Decorative Pillow').listeners.click();
+  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: Protection and care.')));
   assert.ok(!descendants(panel).some(n=>String(n.textContent).includes('Expressing: New beginnings.')));
   descendants(panel).find(n=>n.textContent==='View design brief').listeners.click();assert.match(h.get('brief-text').value,/Protection and care/);assert.doesNotMatch(h.get('brief-text').value,/New beginnings/);
   h.get('gift-form').listeners.submit({preventDefault(){}});
-  assert.ok(descendants(panel).some(n=>String(n.textContent).startsWith('Expressing: New beginnings.')));assert.equal(h.calls.length,0);
+  assert.ok(descendants(panel).some(n=>String(n.textContent).includes('Expressing: New beginnings.')));assert.equal(h.calls.length,0);
 });
 
 test('Expression UI review: ready-to-custom switches reuse the submitted snapshot, not unsubmitted edits',async()=>{
@@ -563,7 +565,7 @@ test('Expression UI review: ready-to-custom switches reuse the submitted snapsho
   h.get('gift-form').values.expression='Courage';h.get('gift-form').values.recipient='UNSUBMITTED NAME';h.get('gift-form').listeners.input({target:{id:'expression'}});
   const results=h.run('state.result');h.run("setGiftMode('custom')");
   assert.equal(h.custom.options.getProfile().expression,'Enduring companionship');assert.equal(h.custom.options.getProfile().recipient,profile.recipient);
-  assert.ok(descendants(h.get('custom-panel')).some(n=>String(n.textContent).startsWith('Expressing: Enduring companionship.')));
+  assert.ok(descendants(h.get('custom-panel')).some(n=>String(n.textContent).includes('Expressing: Enduring companionship.')));
   h.run("setGiftMode('ready')");assert.equal(h.calls.length,1);assert.equal(h.run('state.result'),results);assert.equal(h.run('state.preferencesDirty'),true);
   assert.equal(h.get('gift-form').values.expression,'Courage');assert.equal(h.get('gift-form').values.recipient,'UNSUBMITTED NAME');
 });
@@ -608,4 +610,63 @@ test('Search plan UI review: exact named-theme retrieval is not narrowed by unre
   h.get('gift-form').values={...profile,likes:'They love Star Wars, coffee and gardening.',audience:'men',ageBand:'30-44'};await h.run('search()');await h.run('loadMoreOptions()');
   assert.deepEqual(h.calls,[{action:'search',query:'Star Wars',budget:75},{action:'search',query:'Star Wars',budget:75,cursor:'theme-page'}]);
   assert.equal(h.run('state.profile.audience'),'men');assert.equal(h.run('state.profile.ageBand'),'30-44');assert.equal(h.run('state.result.recommendations.length'),1);
+});
+
+const uiText=root=>descendants(root).map(n=>String(n.textContent??'')).join('\n');
+function clickMeaning(h,text){h.get('expression-chips').children.find(node=>node.textContent===text).listeners.click();}
+const emptyAgent=(extra={})=>({modelConnected:true,model:'openai/gpt-4.1-mini',products:[],recommendations:[],messages:[],toolTrace:['Searched live Shop catalog','Refreshed an observed Shop product'],...extra});
+
+test('Gift context UI review: expression chips are multi-select, reversible, local and combine with own words only at submit',async()=>{
+  const h=await harness(()=>{throw new Error('Custom expression controls are local');},{realCustom:true});h.run("setGiftMode('custom')");
+  h.get('gift-form').values={...profile,expression:'A fresh chapter'};clickMeaning(h,'Gratitude');clickMeaning(h,'Courage');
+  assert.equal(h.get('expression-chips').children.find(n=>n.textContent==='Courage')['aria-pressed'],'true');assert.equal(h.calls.length,0);assert.equal(h.run('state.submittedProfile'),null);
+  h.run('submitCustom()');assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');
+  clickMeaning(h,'Courage');assert.equal(h.get('expression-chips').children.find(n=>n.textContent==='Courage')['aria-pressed'],'false');
+  assert.equal(h.run('state.submittedProfile.expression'),'Courage; Gratitude; A fresh chapter');assert.match(uiText(h.get('custom-panel')),/Expressing: Courage; Gratitude; A fresh chapter/);
+  h.run('submitCustom()');assert.equal(h.run('state.submittedProfile.expression'),'Gratitude; A fresh chapter');assert.equal(h.calls.length,0);
+});
+
+test('Gift context UI review: changing meaning, style or lifestyle invalidates set review without sending data',async()=>{
+  for(const field of ['meaning','style','lifestyle']){
+    const h=await harness(()=>{throw new Error('Context edits cannot dispatch');});await addFixture(h,setProduct('Context'));assert.equal(h.run('setSummary().valid'),true);
+    if(field==='meaning')clickMeaning(h,'Courage');else{h.get('gift-form').values[field]=field==='style'?'classic':'office';h.get('gift-form').listeners.input({target:{id:field}});}
+    assert.equal(h.run('state.preferencesDirty'),true);assert.equal(h.run('state.setItems[0].reviewed'),false);assert.equal(h.run('setSummary().valid'),false);
+    await h.run("createSetCheckout('fixture.myshopify.com')");assert.equal(h.calls.length,0);
+  }
+});
+
+test('Gift context UI review: style, lifestyle and audience have separate controls and consented AI fields',async()=>{
+  const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');assert.match(html,/<label for="audience">Audience /);assert.match(html,/<label for="style">Style /);assert.match(html,/<label for="lifestyle">Lifestyle /);assert.doesNotMatch(html,/Style \/ audience/);
+  const values={...profile,style:'minimalist',lifestyle:'healthcare',audience:'men',expression:'A fresh chapter'};
+  const h=await harness(()=>response(emptyAgent()));h.get('gift-form').values=values;clickMeaning(h,'Courage');h.get('use-agent').checked=true;assert.equal(h.calls.length,0);await h.run('search()');
+  assert.equal(h.requests[0].url,'/api/agent');assert.equal(h.calls[0].style,'minimalist');assert.equal(h.calls[0].lifestyle,'healthcare');assert.equal(h.calls[0].audience,'men');assert.equal(h.calls[0].expression,'Courage; A fresh chapter');assert.equal(h.calls[0].consent,true);
+  assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|recipient|relationship/);
+  const rules=await harness(()=>response({products:[],messages:[]}));rules.get('gift-form').values=values;await rules.run('search()');
+  assert.deepEqual(rules.calls,[{action:'search',query:"ocean gifts men's",budget:75}]);assert.doesNotMatch(JSON.stringify(rules.calls),/minimalist|healthcare|A fresh chapter|style|lifestyle|Private Name/);
+});
+
+test('Gift context UI review: invalid style or lifestyle fails before any provider request',async()=>{
+  for(const field of ['style','lifestyle']){const h=await harness(()=>{throw new Error('Invalid context cannot dispatch');});h.get('gift-form').values={...profile,[field]:'men'};h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.calls.length,0);assert.equal(h.get('form-errors').hidden,false);}
+});
+
+test('Empty diagnostics UI review: found twelve, refreshed ten, empty model shortlist is not an empty catalog',async()=>{
+  const h=await harness(()=>response(emptyAgent({catalogCounts:{observed:12,refreshed:10,selected:0},selectionDiagnostics:{modelProposedCount:0,acceptedCount:0,rejectionCounts:{},zeroSelectionReason:'model_empty'}})));h.get('use-agent').checked=true;await h.run('search()');
+  const text=uiText(h.get('results-content'));assert.match(text,/found 12 distinct catalog listings, refreshed 10, and selected 0/);assert.match(text,/model proposed 0 main gifts; 0 passed server checks/);assert.match(text,/model did not propose any main gifts/);assert.match(text,/not an empty catalog/);assert.doesNotMatch(text,/Shop returned no products|catalog searches returned no products/);
+});
+
+test('Empty diagnostics UI review: rejected proposals show safe reason counts, not fabricated inventory claims',async()=>{
+  const h=await harness(()=>response(emptyAgent({catalogCounts:{observed:12,refreshed:10,selected:0},selectionDiagnostics:{modelProposedCount:3,acceptedCount:0,rejectionCounts:{addon:1,stock:1,budget:1,unknown_private_reason:'PRIVATE RAW ERROR'},zeroSelectionReason:'model_filtered'}})));h.get('use-agent').checked=true;await h.run('search()');
+  const text=uiText(h.get('results-content'));assert.match(text,/model proposed 3 main gifts; 0 passed server checks/);assert.match(text,/1: Optional add-on, not a primary gift/);assert.match(text,/1: Availability not confirmed/);assert.match(text,/1: Over item budget/);assert.match(text,/none passed the verified purchase and preference checks/);assert.doesNotMatch(text,/PRIVATE RAW ERROR|Shop returned no products|catalog searches returned no products/);
+});
+
+test('Empty diagnostics UI review: older responses with observed listings retain an honest unknown-selection explanation',async()=>{
+  const h=await harness(()=>response(emptyAgent({catalogCounts:{observed:12,refreshed:10,selected:0}})));h.get('use-agent').checked=true;await h.run('search()');const text=uiText(h.get('results-content'));
+  assert.match(text,/Shop found 12 listings/);assert.match(text,/does not distinguish an empty model shortlist from rejected proposals/);assert.doesNotMatch(text,/Shop returned no products|catalog searches returned no products/);
+});
+
+test('Empty diagnostics UI review: a genuine no-catalog response is distinct from local exclusion of an accepted shortlist',async()=>{
+  const empty=await harness(()=>response(emptyAgent({catalogCounts:{observed:0,refreshed:0,selected:0},selectionDiagnostics:{modelProposedCount:0,acceptedCount:0,rejectionCounts:{},zeroSelectionReason:'no_catalog'}})));empty.get('use-agent').checked=true;await empty.run('search()');assert.match(uiText(empty.get('results-content')),/catalog searches returned no products/);
+  const p=product('Red','Scented cotton ocean gift');const h=await harness(()=>response(emptyAgent({products:[p],recommendations:[{productId:p.id,variantId:p.variants[0].id,reason:'Verified catalog choice.'}],catalogCounts:{observed:12,refreshed:10,selected:1},selectionDiagnostics:{modelProposedCount:1,acceptedCount:1,rejectionCounts:{},zeroSelectionReason:null}})));h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.run('state.result.recommendations.length'),1);
+  h.get('exclusion-chips').children.find(n=>n['aria-label']==='Fragranced items').listeners.click();assert.equal(h.run('state.result.recommendations.length'),0);assert.equal(h.calls.length,1);
+  const text=uiText(h.get('results-content'));assert.match(text,/none remains eligible under the current local exclusions/);assert.match(text,/1: Excluded by your choices/);assert.doesNotMatch(text,/Shop returned no products|model did not propose any main gifts|catalog searches returned no products/);
 });

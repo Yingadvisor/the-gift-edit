@@ -1,3 +1,4 @@
+import {validateGiftContext} from '../src/gift-context.mjs';
 import {validateAudienceContext} from '../src/audience-context.mjs';
 import {createHmac,randomBytes} from 'node:crypto';
 import {assertRequestHeaders,readBody} from './shop-api.mjs';
@@ -22,9 +23,10 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
       if(req.method==='GET')return send(200,{configured:Boolean(gatewayToken(req,env)),provider:'Vercel AI Gateway',model,modelConnected:false,disclosure:'Configuration presence is not a successful model connection. A user-requested model run must succeed first.'});
       assertRequestHeaders(req);
       const body=await readBody(req);
-      if(body.consent!==true||(body.selfGift!==undefined&&typeof body.selfGift!=='boolean')||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors','selfGift','audience','ageBand','expression'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
+      if(body.consent!==true||(body.selfGift!==undefined&&typeof body.selfGift!=='boolean')||Object.keys(body).some(k=>!['consent','likes','dislikes','occasion','budget','query','excludedFactors','selfGift','audience','ageBand','expression','style','lifestyle'].includes(k)))return send(400,{error:{code:'INVALID_REQUEST',message:'Choose AI-guided search and share only the listed non-identifying gift preferences.'}});
       try { validateAudienceContext({audience:body.audience,ageBand:body.ageBand},body.query??''); } catch { return send(400,{error:{code:'INVALID_REQUEST',message:'Choose only a supported audience and adult age band.'}}); }
       if(body.expression!==undefined&&(typeof body.expression!=='string'||body.expression.length>400))return send(400,{error:{code:'INVALID_REQUEST',message:'Use an optional non-identifying expression of at most 400 characters.'}});
+      try { validateGiftContext({style:body.style,lifestyle:body.lifestyle}); } catch { return send(400,{error:{code:'INVALID_REQUEST',message:'Choose a supported style and lifestyle.'}}); }
       const token=gatewayToken(req,env);
       if(!token)return send(503,{error:{code:'MODEL_NOT_CONFIGURED',message:'The model is not configured. No AI recommendation was generated. You can use rules-based search instead.'}});
       const at=now();for(const[k,v]of rates)if(v.expires<=at)rates.delete(k);
