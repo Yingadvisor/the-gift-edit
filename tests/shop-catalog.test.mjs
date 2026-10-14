@@ -18,7 +18,7 @@ test('rationales cite supplied recipient words, not every synonym expansion',()=
 test('main gift ranking removes greeting cards for birthdays without removing actual card gifts',()=>{
  const make=(title,n)=>product({id:`gid://shopify/Product/${n}`,title,description:'Ocean gift'});
  const result=rankShopProducts([make('Ocean greeting card',1),make('Ocean cardigan',2),make('Ocean card game',3),make('Ocean wallet card holder',4),make('Ocean gift wrapping paper',5)],{...profile,budget:100,occasion:'Birthday'});
- assert.deepEqual(result.recommendations.map(r=>r.product.title),['Ocean cardigan','Ocean card game','Ocean wallet card holder']);
+ assert.deepEqual(result.recommendations.map(r=>r.product.title),['Ocean card game','Ocean cardigan','Ocean wallet card holder']);
  assert.ok(result.recommendations.every(r=>r.giftRole==='primary'));assert.equal(result.addons.length,2);assert.ok(result.addons.every(r=>r.giftRole==='addon'));assert.equal(result.rejected.length,0);
 });
 test('main gift ranking honors explicit card searches and recipient interests, not occasion alone',()=>{
@@ -100,3 +100,9 @@ test('independent-interest ranking reserves evidence-backed coverage while retai
  const context={...profile,likes:'hiking movie',query:'hiking gifts',budget:100};const result=rankShopProducts(entries,context);assert.equal(result.recommendations.length,5);assert.ok(result.recommendations.some(r=>r.product.id==='m'));assert.ok(result.recommendations.some(r=>r.product.id.startsWith('h')));
  const excluded=rankShopProducts([...entries,make('bad',"Women's movie necklace"),make('over','Movie book',10001)],{...context,audience:'men',dislikes:'cinema'});assert.ok(excluded.recommendations.every(r=>r.product.id!=='m'&&r.product.id!=='bad'&&r.product.id!=='over'));assert.ok(!excluded.recommendations.some(r=>r.product.title.includes('Movie')));
 });
+
+test('neutral-first ranking prefers relevant general-use and explicit unisex, never unrelated filler or invented labels',()=>{
+ const make=(id,title)=>product({id,title,description:'Ocean gift'});const entries=[make('unknown','Ocean necklace'),make('male',"Men's ocean bracelet"),make('neutral','Unisex ocean bracelet'),make('mug','Ocean mug'),product({id:'unrelated',title:'Unisex mountain cap',description:'Mountain design'})];
+ const r=rankShopProducts(entries,{...profile,likes:'ocean',query:'ocean gifts',audience:'men'});assert.deepEqual(r.recommendations.map(x=>x.product.id),['neutral','mug','male','unknown']);assert.ok(r.recommendations.find(x=>x.product.id==='unknown').audienceUnknown);assert.ok(r.recommendations.find(x=>x.product.id==='mug').audienceUnknown);
+});
+test('primary-interest gate also applies when model-guided display requests semantic ranking',()=>{const p=product({title:'Plain necklace',description:'A gift for friends'});assert.equal(rankShopProducts([p],{...profile,likes:'ocean',query:'ocean gifts'},{requireInterestEvidence:false}).recommendations.length,0);});

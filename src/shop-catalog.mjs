@@ -7,7 +7,7 @@ import {assessTheme} from './gift-theme.mjs';
 export {audienceSearchQuery,assessAudience};
 import {assessArrival,validArrivalDate} from './delivery-deadline.mjs';
 export {assessArrival,validArrivalDate};
-import {interestQueries,interestMatches} from './interest-coverage.mjs';
+import {interestQueries,interestMatches,supportsPrimaryInterest} from './interest-coverage.mjs';
 import {assessGiftRole, primaryGiftValueScore} from './gift-quality.mjs';
 export {summarizeGiftSet, canAddToGiftSet, setItemKey} from './gift-set.mjs';
 import {EXCLUSION_FACTORS, assessExclusions} from './exclusion-factors.mjs';
@@ -24,7 +24,7 @@ export function validateShopProfile(input){const selfGift=input?.relationship===
 const normal=s=>String(s??'').toLowerCase().replace(/[’]/g,"'").replace(/<[^>]*>/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 const STOP=new Set('a an the they their them he she her his is are was were loves love likes like enjoys enjoy with and or for of to in at from my your recipient someone person friend friends very really about things that this it its have has who whom than much something anything'.split(' '));
 const stem=s=>s.length>4&&s.endsWith('ing')?s.slice(0,-3):s.length>3&&s.endsWith('s')?s.slice(0,-1):s;
-const aliases=[['movie','movies','film','films','cinema','cinematic'],['hiking','hike','hikes','trekking','trail','trails'],['ocean','sea','beach','coastal','seaside','nautical','waves'],['flower','flowers','floral','florals'],['garden','gardening','plants','botanical','botanicals'],['space','astronomy','celestial','stars','galaxy'],['pillow','pillows','cushion','cushions'],['bag','bags','tote','totes'],['host','hosting','entertaining','tableware'],['shell','shells','nautilus'],['moon','moons']];
+const aliases=[['movie','movies','film','films','cinema','cinematic'],['hiking','hike','hikes','trekking','trail','trails'],['ocean','sea','beach','coastal','seaside','nautical','waves'],['flower','flowers','floral','florals'],['garden','gardening','plants','botanical','botanicals'],['space','astronomy','celestial','stars','galaxy'],['pillow','pillows','cushion','cushions'],['bag','bags','tote','totes'],['host','hosting','entertaining','tableware','dinnerware'],['shell','shells','nautilus'],['moon','moons']];
 const tokens=s=>[...new Set(normal(s).split(' ').filter(x=>x.length>2&&!STOP.has(x)))];
 function expanded(words){const set=new Set(words.map(stem));for(const group of aliases)if(group.some(w=>set.has(stem(w))))group.forEach(w=>set.add(stem(w)));return set;}
 export function productCategory(product){
@@ -91,9 +91,10 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
     const hits=positiveTokens.filter(word=>[...expanded([word])].some(w=>words.has(w)));
     // Retain only evidence-linked matches; query relevance alone never invents recipient taste.
     const directRequest=theme.requiredPhrases.length>0||giftRole.reason.includes('explicitly request');
+    if(giftRole.role!=='addon'&&!directRequest&&!supportsPrimaryInterest(product,variant,profile)){reject('No explicit recipient-interest overlap in the returned details');continue;}
     if(requireInterestEvidence&&!hits.length&&giftRole.role!=='addon'&&!directRequest){reject('No explicit recipient-interest overlap in the returned details');continue;}
     const titleWords=expanded(tokens(product.title));const score=hits.length+hits.filter(word=>[...expanded([word])].some(w=>titleWords.has(w))).length;
-    (giftRole.role==='addon'?addons:ranked).push({product,variant,interestMatches:interestMatches(product,variant,coverageQueries),category,index,score,audienceUnknown:audience.status==='unknown'?audience.reason:null,giftRole:giftRole.role,giftRoleReason:giftRole.reason,valueScore:primaryGiftValueScore(variant.price.amount,profile.budget),factorUnknowns:factors.unknown,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[giftRole.role==='addon'?'Optional add-on from the current catalog search, not a primary gift.':!hits.length&&directRequest?'The merchant listing supports your explicit search request; this does not infer an additional recipient interest.':`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
+    (giftRole.role==='addon'?addons:ranked).push({product,variant,interestMatches:interestMatches(product,variant,coverageQueries),neutralPreference:neutralGiftPreference(product,variant),category,index,score,audienceUnknown:audience.status==='unknown'?audience.reason:null,giftRole:giftRole.role,giftRoleReason:giftRole.reason,valueScore:primaryGiftValueScore(variant.price.amount,profile.budget),factorUnknowns:factors.unknown,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[giftRole.role==='addon'?'Optional add-on from the current catalog search, not a primary gift.':!hits.length&&directRequest?'The merchant listing supports your explicit search request; this does not infer an additional recipient interest.':`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
   }
   // Interest evidence remains the strongest signal. Value and category variety are
   // soft tie-breakers, never minimum-spend or minimum-count requirements.
@@ -109,7 +110,7 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
   const count=item=>categoryCounts.set(group(item),(categoryCounts.get(group(item))??0)+1);
   while(ranked.length&&recommendations.length<Math.max(1,Math.min(40,Number.isInteger(limit)?limit:10))){
     const coverageScore=item=>coverageQueries.length<2?0:item.interestMatches.length?Math.min(...item.interestMatches.map(id=>interestCounts.get(id)??0)):Infinity;
-    ranked.sort((a,b)=>coverageScore(a)-coverageScore(b)||rankScore(b)-rankScore(a)||b.score-a.score||a.index-b.index);
+    ranked.sort((a,b)=>coverageScore(a)-coverageScore(b)||b.score-a.score||b.neutralPreference-a.neutralPreference||rankScore(b)-rankScore(a)||b.score-a.score||a.index-b.index);
     const next=ranked.shift();
     if(capped(next)){rejected.push({id:next.product.id,reason:`Category limit reached: at most 5 in ${next.category?.groupLabel??'Other'}.`});continue;}
     recommendations.push(next);count(next);for(const id of next.interestMatches)interestCounts.set(id,(interestCounts.get(id)??0)+1);
@@ -123,9 +124,17 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
   return {recommendations,addons:selectedAddons,rejected,notices:[...evidence.notices,...(profile.audienceNotice?[profile.audienceNotice]:[])],engine:SHOP_ENGINE};
 }
 export function shopBrief(profile,rec,{excludedFactors=[]}={}){return [
-  'GIFT BRIEF · THE GIFT EDIT',`Recipient: ${profile.recipient}`,`Relationship: ${profile.relationship||'Not specified'}`,`Occasion: ${profile.occasion||'Just because'}`,`What to express: ${profile.expression||'Not specified'}`,`Aesthetic style: ${profile.style||'any'}`,`Lifestyle context: ${profile.lifestyle||'any'}`,`Adult age band: ${profile.ageBand||'any'}`,`Intended audience: ${profile.audience||'any'}`,`Recipient likes: ${profile.likes}`,`Avoid: ${profile.dislikes||'None stated'}`,`Item-price budget: ${profile.budget} USD (tax and shipping extra)`,
+  'GIFT BRIEF · THE GIFT EDIT',`Recipient: ${profile.recipient}`,`Relationship: ${profile.relationship||'Not specified'}`,`Occasion: ${profile.occasion||'Not specified'}`,`What to express: ${profile.expression||'Not specified'}`,`Aesthetic style: ${profile.style||'any'}`,`Lifestyle context: ${profile.lifestyle||'any'}`,`Adult age band: ${profile.ageBand||'any'}`,`Intended audience: ${profile.audience||'any'}`,`Recipient likes: ${profile.likes}`,`Avoid: ${profile.dislikes||'None stated'}`,`Item-price budget: ${profile.budget} USD (tax and shipping extra)`,
   `Must arrive by: ${profile.arrivalDeadline||'Not specified'} (not verified by this catalog; no delivery promise)`,`Quick exclusions: ${EXCLUSION_FACTORS.filter(x=>excludedFactors.includes(x.id)).map(x=>x.label).join(', ')||'None selected'}`,`Cannot verify from returned details: ${(rec.factorUnknowns??[]).map(x=>x.label).join(', ')||'No selected factor flagged as unknown; not a merchant guarantee'}`,
   `Shop product: ${rec.product.title}`,`Merchant: ${rec.variant.seller.name||rec.variant.seller.domain}`,`Current featured price: ${formatMoney(rec.variant.price)}`,`Product link: ${rec.url||'Unavailable'}`,
   'Catalog prices and stock can change. Refresh the exact variant before checkout. The buyer reviews final terms, shipping and taxes and pays on the merchant page.',
   'Ranking is rules-based, not an LLM recommendation.'
 ].join('\n');}
+
+export function neutralGiftPreference(product,variant){
+ const audience=assessAudience(product,variant,{audience:'any'}).audience;
+ if(audience==='unisex')return 2;
+ if(audience==='men'||audience==='women')return 1;
+ if(audience==='unknown'&&['drinkware','stationery-books','toys-games','homegoods','collectibles'].includes(productCategory(product).groupId))return 2;
+ return 0;
+}

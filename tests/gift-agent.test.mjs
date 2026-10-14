@@ -411,3 +411,12 @@ test('catalog alternatives never prune the sole coverage of an already represent
  const out=await runGiftAgent({...profile,likes:'hiking movie gardening',query:'hiking gifts'},{callModel:async()=>replies.shift(),callShop:async(name,args)=>name==='search_catalog'?{products:[...chosen,gardening]}:{product:chosen.find(p=>p.id===args.catalog.id)}});
  assert.ok(out.recommendations.some(r=>r.productId===chosen[9].id));assert.equal(out.recommendations.length,9);assert.equal(out.catalogAlternatives.length,1);assert.equal(out.catalogAlternatives[0].id,gardening.id);assert.equal(out.products.length,out.recommendations.length);
 });
+
+test('primary interest cannot be replaced by an unrelated model-selected product',async()=>{const p=product();p.title='Plain necklace';p.description.plain='A generic gift for friends';const out=await runGiftAgent({...profile,likes:'ocean',query:'ocean gifts'},harness(undefined,p).options);assert.equal(out.recommendations.length,0);assert.equal(out.selectionDiagnostics.rejectionCounts.interest,1);});
+test('blank occasion is not silently replaced with Birthday in the model context',async()=>{const h=harness();await runGiftAgent({...profile,occasion:''},h.options);const sent=JSON.parse(h.modelCalls[0].messages[1].content);assert.equal(sent.occasion,'');assert.doesNotMatch(JSON.stringify(sent),/Birthday|Friend/);});
+test('women-target selected variants cannot reappear through AI final, rules recovery, or uncovered-interest alternatives',async()=>{
+ const p=product();p.title='Unisex ocean bracelet';p.variants[0].metadata={gender:'female'};
+ const input={...profile,likes:'They love ocean walks, collecting shells, and hosting friends for dinner.',query:'ocean walks gifts',audience:'men',ageBand:'18-29',budget:75,dislikes:'Silk and pillows'};
+ const final=await runGiftAgent(input,harness(undefined,p).options);assert.equal(final.recommendations.length,0);assert.equal(final.selectionDiagnostics.rejectionCounts.audience,1);assert.equal(final.catalogAlternatives.length,0);
+ const recovery=await runGiftAgent(input,{...harness([search(),search()],p).options,maxSteps:2});assert.equal(recovery.modelConnected,false);assert.deepEqual(recovery.products,[]);
+});

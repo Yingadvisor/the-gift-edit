@@ -33,7 +33,7 @@ export function validateProfile(input) {
   if (!Number.isFinite(budget) || budget <= 0 || budget > 10000) errors.push('Enter a demo budget greater than 0 and no more than 10,000.');
   if (String(input?.dislikes ?? '').length > 1200) errors.push('Keep dislikes under 1,200 characters.');
   if (String(input?.occasion ?? '').length > 80) errors.push('Keep the occasion under 80 characters.');
-  return { valid: !errors.length, errors, profile: {recipient, likes, budget, selfGift: input?.selfGift === true, dislikes: String(input?.dislikes ?? '').trim(), occasion: String(input?.occasion ?? 'Just because').trim(), relationship: String(input?.relationship ?? '').slice(0,80)} };
+  return { valid: !errors.length, errors, profile: {recipient, likes, budget, selfGift: input?.selfGift === true, dislikes: String(input?.dislikes ?? '').trim(), occasion: String(input?.occasion ?? '').trim(), relationship: String(input?.relationship ?? '').slice(0,80)} };
 }
 
 /** Rules deliberately prefer uncertainty over invented recipient interests. */

@@ -111,3 +111,54 @@ test('explicit mixed-age product use is not child-only; adult purchaser mentions
     {title:'Puzzle',description:'For children. Not suitable for all ages. Ages 8+'},
   ]) assert.equal(check(product).eligible,false,JSON.stringify(product));
 });
+
+
+test('common audience merchandising spellings do not fall through as unknown', () => {
+  for (const title of ['Womens ocean bracelet', 'Ladies ocean bracelet', "Ladies' ocean bracelet", 'Ocean bracelet gift for her']) {
+    const result = check({title});
+    assert.equal(result.audience, 'women', title);
+    assert.equal(result.eligible, false, title);
+  }
+  for (const title of ['Mens ocean bracelet', 'Ocean bracelet gift for him']) {
+    assert.equal(check({title}).audience, 'men', title);
+    assert.equal(check({title}).eligible, true, title);
+  }
+  for (const title of ['Women-owned ocean crafts', 'Female connector adapter', 'Women in history book', 'History of men book', 'Ladies in history book']) {
+    assert.equal(check({title}).audience, 'unknown', title);
+  }
+});
+
+test('selected variant audience outranks generic product targeting and marketing', () => {
+  const product = {title:'Unisex ocean bracelet', description:'Gifts for men and women.'};
+  for (const variant of [
+    {options:[{name:'Gender',label:'Women'}]},
+    {options:[{name:'Target gender',label:'Female'}]},
+    {metadata:{gender:'female'}},
+    {metadata:{gender:['Women']}},
+    {title:"Women's ocean style"},
+  ]) {
+    const result = check(product, men, variant);
+    assert.equal(result.audience, 'women', JSON.stringify(variant));
+    assert.equal(result.eligible, false, JSON.stringify(variant));
+  }
+  assert.equal(check({title:"Women's and men's ocean styles"}, men, {options:[{name:'Gender',label:'Men'}]}).audience, 'men');
+  assert.equal(check({title:'Ocean bracelet',options:[{name:'Gender',values:[{label:'Women'}]}]}, men, {options:[{name:'Color',label:'Blue'}]}).audience, 'unknown');
+  assert.equal(check({title:'Ocean bracelet'}, men, {options:[{name:'Color',label:'Women'}]}).audience, 'unknown');
+});
+
+test('explicit product targeting outranks lower-specificity mixed or unisex prose', () => {
+  for (const targeting of [{title:"Women's ocean bracelet"}, {title:'Ocean bracelet',metadata:{gender:'female'}}, {title:'Ocean bracelet',category:{name:'Women'}}]) {
+    for (const description of ['Browse gifts for men and women.', 'A unisex collection for all genders.']) {
+      const result = check({...targeting,description});
+      assert.equal(result.audience, 'women', JSON.stringify({targeting,description}));
+      assert.equal(result.eligible, false);
+    }
+  }
+  // Inclusive product-use wording has the same meaning in either word order.
+  for (const description of ['For men and women.', 'For women and men.']) {
+    assert.equal(check({title:'Ocean bracelet',description}).eligible, true);
+    assert.equal(check({title:'Ocean bracelet',description}).audience, 'unisex');
+  }
+  assert.equal(check({title:"Men's and women's styles"}).audience, 'mixed');
+  assert.equal(check({title:'Ocean bracelet'}).audience, 'unknown');
+});

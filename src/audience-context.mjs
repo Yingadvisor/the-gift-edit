@@ -71,29 +71,55 @@ function positive(text, pattern) {
   return null;
 }
 const audiencePatterns = {
-  men: /\b(?:men's|man's|for (?:a |adult )?(?:men|man|males?)|male (?:audience|adults?|users?))\b|男士|男性向|男款/,
-  women: /\b(?:women's|woman's|for (?:a |adult )?(?:women|woman|females?)|female (?:audience|adults?|users?))\b|女士|女性向|女款/,
-  unisex: /\b(?:unisex|all genders|any gender|gender[- ]neutral)\b|男女通用/,
+  men: /\b(?:men'?s|man's|for (?:a |adult )?(?:men|man|males?)|male (?:audience|adults?|users?)|gifts? for him)\b|男士|男性向|男款/,
+  women: /\b(?:women'?s|woman's|ladies(?=\b)(?!'?\s+(?:in|of|at|from|who)\b)|for (?:a |adult )?(?:women|woman|females?|ladies)|female (?:audience|adults?|users?)|gifts? for her)\b|女士|女性向|女款/,
+  unisex: /\b(?:unisex|all genders|any gender|gender[- ]neutral|for (?:both )?(?:men (?:and|&) women|women (?:and|&) men))\b|男女通用/,
 };
+const audienceValues = {
+  men: /^(?:male|man|men|men'?s|him)$/i,
+  women: /^(?:female|woman|women|women'?s|ladies'?|her)$/i,
+  unisex: /^(?:unisex|all|any|gender[- ]neutral|(?:men (?:and|&) women|women (?:and|&) men))$/i,
+};
+const audienceField = /\.(?:gender|audience|target[_ -]?gender|target[_ -]?audience)$/i;
+function audienceSources(product, variant) {
+  const entries = sources(product, variant);
+  // Read the exact selected variant only, never the unselected product options.
+  for (const [index, option] of (Array.isArray(variant?.options) ? variant.options : []).entries()) {
+    if (!option || !/^(?:gender|audience|target[_ -]?gender|target[_ -]?audience)$/i.test(String(option.name ?? '').trim())) continue;
+    entries.push(...fields(option.label, `variant.options[${index}].label`).map(entry => ({ ...entry, selectedAudience: true })));
+  }
+  return entries;
+}
 export function classifyProductAudience(product, variant) {
   const evidence = [];
-  const found = new Set();
-  for (const entry of sources(product, variant)) {
+  let strongest = -1;
+  let found = new Set();
+  for (const entry of audienceSources(product, variant)) {
+    const path = entry.source.replace(/\[\d+\]/g, '');
+    const structured = entry.selectedAudience || audienceField.test(path);
+    const category = /\.category(?:\.(?:name|title))?$/.test(path);
+    const title = /\.title$/.test(path);
+    const variantSource = path.startsWith('variant.');
+    const priority = variantSource && structured ? 4 : variantSource && (title || category) ? 3 : structured || title || category ? 2 : 1;
+    const local = new Set();
     for (const [audience, pattern] of Object.entries(audiencePatterns)) {
-      const structured = /\.(?:gender|audience|target[_ -]?gender|category(?:\.name)?)$/i.test(entry.source)
-        && ({ men: /^(?:male|man|men|men's)$/i, women: /^(?:female|woman|women|women's)$/i, unisex: /^(?:unisex|all|any|gender[- ]neutral)$/i }[audience]).test(entry.text);
-      if (structured || positive(entry.text, pattern)) {
-        found.add(audience);
+      if (((structured || category) && audienceValues[audience].test(entry.text)) || positive(entry.text, pattern)) {
+        local.add(audience);
         evidence.push({ audience, source: entry.source, text: entry.text });
       }
     }
+    if (!local.size || priority < strongest) continue;
+    if (priority > strongest) { strongest = priority; found = new Set(); }
+    for (const audience of local) found.add(audience);
   }
-  // Separate men's and women's evidence can describe selectable variants. Do not
-  // silently turn contradictory listings into a verified unisex product.
+  // Exact selected-variant targeting outranks a generic unisex collection, and
+  // product targeting outranks broad marketing prose. Same-tier contradictory
+  // listings still remain mixed/unknown rather than inventing suitability.
   const audience = found.size === 0 ? 'unknown' : found.size === 1 ? [...found][0]
     : found.has('unisex') ? 'unisex' : 'mixed';
   return { audience, evidence };
 }
+
 function ageEvidence(product, variant) {
   const ranges = [];
   const childEvidence = [];
