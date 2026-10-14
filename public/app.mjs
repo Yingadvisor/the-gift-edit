@@ -23,7 +23,7 @@ function renderMessages(host,messages,{all=true,index=null}={}){
     host.append(box);
   }
 }
-function updatePreferencesSummary(){const input=Object.fromEntries(new FormData(form));let active=state.excludedFactors.length;for(const key of ['ageBand','audience','style','lifestyle'])if(input[key]&&input[key]!=='any')active++;for(const key of ['dislikes'])if(String(input[key]??'').trim())active++;if(input.relationship&&input.relationship!=='Friend')active++;if(input.occasion&&input.occasion!=='Birthday')active++;if(input.mustArrive)active++;if($('use-agent').checked)active++;$('preferences-summary').textContent=active?`More preferences · ${active} active`:'More preferences';}
+function updatePreferencesSummary(){const input=Object.fromEntries(new FormData(form));let active=state.excludedFactors.length;for(const key of ['ageBand','audience','style','lifestyle'])if(input[key]&&input[key]!=='any')active++;for(const key of ['dislikes'])if(String(input[key]??'').trim())active++;if(input.relationship&&input.relationship!=='Friend')active++;if(input.occasion&&input.occasion!=='Birthday')active++;if(input.mustArrive)active++;$('preferences-summary').textContent=active?`More preferences · ${active} active`:'More preferences';}
 function renderExpressionChips(){state.expressionChoices=[];}
 function renderFactorChips(){
   updatePreferencesSummary();
@@ -271,3 +271,7 @@ renderGiftSet();
 
 form.addEventListener('change',updatePreferencesSummary);
 updatePreferencesSummary();
+
+function restoreAgentChoice(){try{const saved=window.localStorage?.getItem('gift-edit-ai-mode');if(saved==='off')$('use-agent').checked=false;else if(saved==='on')$('use-agent').checked=true;}catch{/* Storage is optional; the visible control remains usable. */}}
+$('use-agent').addEventListener('change',()=>{try{window.localStorage?.setItem('gift-edit-ai-mode',$('use-agent').checked?'on':'off');}catch{/* No provider call or consent inference from storage. */}});
+restoreAgentChoice();

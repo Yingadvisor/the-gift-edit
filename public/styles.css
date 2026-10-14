@@ -32,3 +32,5 @@
 .search-details{margin:24px 0 10px;border-top:1px solid var(--line);padding-top:16px;font-size:12px;line-height:1.7;color:var(--muted)}.search-details>summary{cursor:pointer;font-weight:600;color:var(--ink);padding:8px 0}.search-details[open]>summary{margin-bottom:12px}.search-details .result-counts{border:0;background:transparent;padding:0}.recovery-label{margin:0 0 12px}
 
 .more-preferences{margin:4px 0 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 0}.more-preferences>summary{cursor:pointer;font-size:12px;font-weight:600;padding:12px 0}.more-preferences[open]>summary{margin-bottom:16px}.more-preferences .agent-mode{margin-top:4px}
+
+.ai-privacy-details{font-size:11px;line-height:1.6;margin-top:8px}.ai-privacy-details>summary{cursor:pointer;text-decoration:underline}.ai-privacy-details[open]>summary{margin-bottom:8px}
