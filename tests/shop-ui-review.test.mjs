@@ -29,7 +29,7 @@ class Element {
 }
 const descendants=node=>[node,...node.children.flatMap(descendants)];
 async function harness(responder){
-  const roots=new Map();const calls=[];
+  const roots=new Map();const calls=[];const requests=[];
   const get=id=>{
     for(const root of roots.values()){const found=descendants(root).find(n=>n.id===id);if(found)return found;}
     if(!roots.has(id)){const node=new Element(id);node.id=id;roots.set(id,node);}
@@ -40,14 +40,14 @@ async function harness(responder){
     document:{getElementById:get,createElement:tag=>new Element(tag)},
     window:{innerWidth:1000},navigator:{},
     FormData:class{constructor(form){return Object.entries(form.values);}},
-    fetch:async(url,options)=>{const payload=JSON.parse(options.body);calls.push(payload);return responder(payload,calls.length);},
+    fetch:async(url,options)=>{const payload=JSON.parse(options.body);calls.push(payload);requests.push({url,payload});return responder(payload,calls.length);},
   });
   const app=(await readFile(new URL('../public/app.mjs',import.meta.url),'utf8')).replace(/^import[^\n]*\n/gm,'');
   vm.runInContext(app,context);
   const run=source=>vm.runInContext(source,context);
   context.fixtureProfile={...profile};context.fixtureProduct=product();
   run('state.profile=fixtureProfile;state.active={rec:{product:fixtureProduct,variant:fixtureProduct.variants[0]},product:null,variant:null,selected:fixtureProduct.selected,requested:fixtureProduct.selected,profile:{...fixtureProfile},valid:false};');
-  return {get,run,calls,context};
+  return {get,run,calls,requests,context};
 }
 
 test('Shop UI review: pending checkout A cannot appear beneath refreshed variant B',async()=>{
@@ -98,4 +98,71 @@ test('Shop UI review: pre-checkout refresh warnings survive combined checkout en
   const h=await harness(payload=>payload.action==='checkout'?response({checkout:{status:'incomplete',currency:'USD',line_items:[],totals:[],links:[],messages:[],continue_url:'https://fixture.myshopify.com/checkout/red'},messages:[warning]}):response({product:product(),messages:[]}));
   await h.run('refreshProduct(state.active.selected)');await h.run('createCheckout()');
   assert.ok(descendants(h.get('checkout-result')).some(n=>n.textContent===warning.content));
+});
+
+test('Agent UI review: initialization and checking AI consent alone make no network calls',async()=>{
+  const h=await harness(()=>{throw new Error('Unexpected request');});
+  h.get('use-agent').checked=true;
+  assert.equal(h.calls.length,0);
+});
+
+test('Agent UI review: explicit AI search sends only consented preference fields, not identity fields',async()=>{
+  const h=await harness(()=>response({modelConnected:true,model:'openai/gpt-4.1-mini',products:[],recommendations:[],messages:[],toolTrace:[]}));
+  h.get('use-agent').checked=true;
+  h.run("state.excludedFactors=['fragrance']");
+  await h.run('search()');
+  assert.deepEqual(h.requests,[{url:'/api/agent',payload:{consent:true,likes:profile.likes,dislikes:profile.dislikes,occasion:profile.occasion,budget:profile.budget,query:profile.query,excludedFactors:['fragrance']}}]);
+  assert.doesNotMatch(JSON.stringify(h.calls),/Private Name|Friend|recipient|relationship/);
+});
+
+test('Agent UI review: failed AI search never silently calls rules or claims model connection',async()=>{
+  const h=await harness(()=>({ok:false,json:async()=>({error:{code:'MODEL_NOT_CONFIGURED',message:'Model not configured'}})}));
+  h.get('use-agent').checked=true;
+  await h.run('search()');
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,'/api/agent');
+  assert.equal(h.run('state.agentResult'),null);
+  assert.match(h.get('engine-badge').textContent,/No AI model connected/);
+});
+
+test('Agent UI review: exact recommended second variant remains visible and selected',async()=>{
+  const p=product();const blue=product('Blue').variants[0];p.variants.push(blue);p.selected=selected('Blue');
+  const h=await harness(()=>response({modelConnected:true,model:'openai/gpt-4.1-mini',products:[p],recommendations:[{productId:p.id,variantId:blue.id,reason:'Verified blue ocean gift.'}],messages:[],toolTrace:[]}));
+  h.get('use-agent').checked=true;
+  await h.run('search()');
+  assert.equal(h.run('state.result.recommendations.length'),1);
+  assert.equal(h.run('state.result.recommendations[0].variant.id'),blue.id);
+});
+
+test('Exclusion UI review: chips rerank locally and clear without clearing typed dislikes',async()=>{
+  const h=await harness(()=>{throw new Error('Chip controls must not call network');});
+  h.context.fixtureProducts=[product('Red','Scented cotton ocean gift'),{...product('Blue','Silk ocean gift'),id:'gid://shopify/p/silk'}];
+  h.run('state.products=fixtureProducts;render()');
+  assert.equal(h.run('state.result.recommendations.length'),1);
+  h.get('exclusion-chips').children.find(n=>n['aria-label']==='Fragranced items').listeners.click();
+  assert.equal(h.run('state.result.recommendations.length'),0);
+  h.get('reset-factors').listeners.click();
+  assert.equal(h.run('state.result.recommendations.length'),1);
+  assert.equal(h.run('state.profile.dislikes'),'silk');
+  assert.equal(h.get('gift-form').values.dislikes,'silk');
+  assert.equal(h.calls.length,0);
+});
+
+test('Exclusion UI review: refreshed selected-factor conflict blocks checkout',async()=>{
+  const h=await harness(()=>response({product:product('Red','Scented cotton ocean gift'),messages:[]}));
+  h.run("state.excludedFactors=['fragrance']");
+  await h.run('refreshProduct(state.active.selected)');
+  assert.equal(h.run('state.active.valid'),false);
+  assert.equal(h.get('create-checkout').disabled,true);
+});
+
+test('Exclusion review: public review hash includes variant metadata and product option changes',()=>{
+  const p=product();const v=p.variants[0];
+  assert.notEqual(reviewContent(p,v),reviewContent(p,{...v,metadata:{fragrance:'Scented'}}));
+  assert.notEqual(reviewContent(p,v),reviewContent({...p,options:[...p.options,{name:'Size',values:[{label:'S'},{label:'M'}]}]},v));
+});
+
+test('Exclusion review: unrelated one-size accessory cannot cancel actual apparel size choices',()=>{
+  const p={title:'Ocean hoodie',description:'Includes a one-size scarf.',options:[{name:'Size',values:[{label:'S'},{label:'M'}]}]};
+  const v={options:[{name:'Size',label:'M'}]};
+  assert.equal(shop.assessExclusions(p,v,['sizing']).matches.length,1);
 });

@@ -27,3 +27,12 @@ Confirm official event start, public-repository requirements and allowed pre-exi
 ## Rules limits
 
 English keywords and bounded synonyms are not general language understanding. Ambiguous statements may produce no match. Explicit avoidances are checked against returned title/description/metadata/option text, but missing merchant detail is not proof of suitability. Relationship and occasion are preserved locally but do not infer taste.
+
+## Optional Vercel Gateway agent release
+- [x] Actual model-controlled read-only search/get_product loop, bounded and mock-tested.
+- [x] Explicit AI-mode data-sharing choice; recipient name field never sent.
+- [x] Unknown exclusion evidence disclosed; merchant facts grounded in actual returned data.
+- [ ] Provider credits/authentication confirmed by a real bounded model run.
+- [ ] Consolidated agent/chips/layout source release approved and deployed.
+- [ ] Public browser verification of the new release and mobile layout.
+- [ ] Distributed rate/cost controls for production traffic.

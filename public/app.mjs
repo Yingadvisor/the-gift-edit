@@ -1,14 +1,14 @@
 import {reviewContent} from '/modules/product-review.mjs';
-import {validateShopProfile,rankShopProducts,SHOP_ENGINE,formatMoney,safeHttpsUrl,productImage,selectedMatches,shopBrief} from '/modules/shop-catalog.mjs';
+import {validateShopProfile,rankShopProducts,EXCLUSION_FACTORS,assessExclusions,SHOP_ENGINE,formatMoney,safeHttpsUrl,productImage,selectedMatches,shopBrief} from '/modules/shop-catalog.mjs';
 const $=id=>document.getElementById(id);
 const form=$('gift-form');
-const state={profile:null,products:[],messages:[],excludedIds:[],excludedCategories:[],result:null,searchSeq:0,productSeq:0,active:null,checkoutAttempts:new Map()};
+const state={profile:null,products:[],messages:[],excludedIds:[],excludedCategories:[],excludedFactors:[],result:null,agentResult:null,searchSeq:0,productSeq:0,active:null,checkoutAttempts:new Map()};
 const el=(tag,className,text)=>{const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;};
 const button=(text,className,fn)=>{const b=el('button',className,text);b.type='button';b.addEventListener('click',fn);return b;};
 function external(text,url,className=''){const a=el('a',className,text);const valid=safeHttpsUrl(url);if(valid){a.href=valid;a.target='_blank';a.rel='noopener noreferrer';a.referrerPolicy='no-referrer';}else a.removeAttribute('href');return a;}
 function announce(text){$('result-announcement').textContent=text;}
-async function api(payload){
-  const res=await fetch('/api/shop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),cache:'no-store',credentials:'same-origin'});
+async function api(payload,endpoint='/api/shop'){
+  const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),cache:'no-store',credentials:'same-origin'});
   let data;try{data=await res.json();}catch{throw Object.assign(new Error('The commerce server returned an unreadable response. No payment was made.'),{code:'INVALID_RESPONSE'});}
   if(!res.ok||data.error){const error=typeof data.error==='object'?data.error:{};throw Object.assign(new Error(error.message||data.message||'Shop is unavailable right now. No payment was made.'),{code:error.code||data.code||'SHOP_ERROR',reviewRequired:error.reviewRequired===true,outcomeUncertain:error.outcomeUncertain===true});}return data;
 }
@@ -23,17 +23,28 @@ function renderMessages(host,messages,{all=true,index=null}={}){
     host.append(box);
   }
 }
+function renderFactorChips(){
+  const host=$('exclusion-chips');host.replaceChildren();
+  for(const factor of EXCLUSION_FACTORS){const selected=state.excludedFactors.includes(factor.id);const b=button(`${selected?'✓ ':''}${factor.label}`,'exclusion-chip',()=>{state.excludedFactors=selected?state.excludedFactors.filter(id=>id!==factor.id):[...state.excludedFactors,factor.id];renderFactorChips();render();});b.setAttribute('aria-pressed',String(selected));b.setAttribute('aria-label',factor.label);host.append(b);}
+  $('reset-factors').disabled=!state.excludedFactors.length;
+}
+function factorWarning(host,unknowns){if(unknowns?.length)host.append(el('p','factor-unknown',`Can’t verify: ${unknowns.map(x=>x.label).join(', ')}. The returned details are incomplete. Check with the merchant before buying.`));}
 function render(){
   const host=$('results-content');host.replaceChildren();
   if(!state.profile)return;
-  const result=rankShopProducts(state.products,state.profile,state);state.result=result;
+  const candidateProducts=state.agentResult?state.products.map(product=>{const chosen=state.agentResult.recommendations.find(rec=>rec.productId===product.id);const variant=product.variants?.find(item=>item.id===chosen?.variantId);return variant?{...product,variants:[variant,...product.variants.filter(item=>item!==variant)]}:null;}).filter(Boolean):state.products;
+  const result=rankShopProducts(candidateProducts,state.profile,{...state,requireInterestEvidence:!state.agentResult});
+  if(state.agentResult){const order=new Map(state.agentResult.recommendations.map((r,i)=>[`${r.productId}|${r.variantId}`,{...r,index:i}]));result.recommendations=result.recommendations.filter(rec=>order.has(`${rec.product.id}|${rec.variant.id}`)).sort((a,b)=>order.get(`${a.product.id}|${a.variant.id}`).index-order.get(`${b.product.id}|${b.variant.id}`).index);for(const rec of result.recommendations){const chosen=order.get(`${rec.product.id}|${rec.variant.id}`);rec.reasons=[chosen.reason,`The refreshed item price is ${formatMoney(rec.variant.price)}, before tax and shipping.`];}}
+  state.result=result;
+  $('engine-badge').textContent=state.agentResult?`AI-guided · ${state.agentResult.model} · Shop MCP`:'Shop MCP + rules · No AI model connected';
   $('results-title').textContent=`A thoughtful edit for ${state.profile.recipient}.`;
   renderMessages(host,state.messages);
+  if(state.agentResult){const trace=el('div','agent-trace');trace.append(el('strong','','Model tool use'),el('p','',`The model chose searches and product refreshes. ${state.agentResult.toolTrace?.length||0} read-only tool call(s) completed. IDs and purchase constraints were validated by code. Changing exclusions re-filters this selection locally; search again for a new model selection.`));host.append(trace);}
   for(const note of result.notices)host.append(el('p','result-notice',note));
-  if(state.excludedIds.length||state.excludedCategories.length){const bar=el('div','exclusion-bar');bar.append(el('span','',`${state.excludedIds.length} item(s) and ${state.excludedCategories.length} category / categories excluded.`),button('Reset exclusions','text-button',()=>{state.excludedIds=[];state.excludedCategories=[];render();}));host.append(bar);}
+  if(state.excludedIds.length||state.excludedCategories.length||state.excludedFactors.length){const bar=el('div','exclusion-bar');bar.append(el('span','',`${state.excludedIds.length} item(s) and ${state.excludedCategories.length} category / categories excluded. ${state.excludedFactors.length} quick factor(s) selected.`),button('Reset exclusions','text-button',()=>{state.excludedIds=[];state.excludedCategories=[];state.excludedFactors=[];renderFactorChips();render();}));host.append(bar);}
   if(!result.recommendations.length){const box=el('div','empty-state no-match');box.append(el('span','no-match-symbol','✧'),el('h4','','No honest match. And that’s okay.'),el('p','',state.products.length?'The returned items did not meet the USD item budget, availability, explicit avoidances and recipient-interest checks. Try a different product query; we won’t silently stretch your budget.':'Shop returned no products for this query. Try different product words or a budget that fits your plans.'));host.append(box);announce('No matching gifts remain.');return;}
-  const summary=el('div','result-summary');summary.append(el('span','','✧'));const copy=el('div');copy.append(el('h4','',`${result.recommendations.length} real listings, with a reason for each.`),el('p','',`Shop catalog data · US / USD demo. Item prices are at or below $${state.profile.budget}. Shipping and tax are extra. Ranking is rules-based, not AI.`));summary.append(copy);host.append(summary);
-  result.recommendations.forEach((rec,index)=>host.append(card(rec,index)));announce(`${result.recommendations.length} matching listings. ${SHOP_ENGINE.disclosure}`);
+  const summary=el('div','result-summary');summary.append(el('span','','✧'));const copy=el('div');copy.append(el('h4','',`${result.recommendations.length} real listings, with a reason for each.`),el('p','',`Shop catalog data · US / USD demo. Item prices are at or below $${state.profile.budget}. Shipping and tax are extra. ${state.agentResult?'AI-guided selection with deterministic purchase constraints.':'Ranking is rules-based, not AI.'}`));summary.append(copy);host.append(summary);
+  result.recommendations.forEach((rec,index)=>host.append(card(rec,index)));announce(`${result.recommendations.length} matching listings. ${state.agentResult?'Model-guided selection, validated against live merchant data.':SHOP_ENGINE.disclosure}`);
 }
 function card(rec,index){
   const {product:p,variant:v}=rec;const article=el('article','gift-card');
@@ -43,6 +54,7 @@ function card(rec,index){
   body.append(el('p','specifications',(v.options??[]).map(o=>`${o.name}: ${o.label}`).join(' · ')||'Featured variant'));
   body.append(el('span','fit-badge','Catalog match · exact options checked next'));
   const reasons=el('ul','reason-list');for(const r of rec.reasons)reasons.append(el('li','',r));body.append(reasons);
+  factorWarning(body,rec.factorUnknowns);
   const price=el('div','price-row');price.append(el('span','price-value',formatMoney(v.price)),el('span','','item price · shipping & tax extra'));body.append(price);
   body.append(el('p','merchant-domain',`Sold by ${v.seller.domain}`));
   renderMessages(body,state.messages,{all:false,index:rec.index});
@@ -50,19 +62,19 @@ function card(rec,index){
   const feedback=el('div','card-feedback');feedback.append(button('Not this one','feedback-button',()=>{state.excludedIds.push(p.id);render();}));if(rec.category)feedback.append(button(`Avoid ${rec.category.label}`,'feedback-button',()=>{state.excludedCategories.push(rec.category.id);render();}));body.append(feedback);article.append(body);return article;
 }
 async function search(){
-  const seq=++state.searchSeq;const validation=validateShopProfile(Object.fromEntries(new FormData(form)));
-  $('form-errors').hidden=validation.valid;$('form-errors').textContent=validation.errors.join(' ');state.products=[];state.messages=[];state.result=null;$('results-content').replaceChildren();
+  const seq=++state.searchSeq;const useAgent=$('use-agent').checked===true;const input=Object.fromEntries(new FormData(form));const validation=validateShopProfile({...input,query:useAgent&&!String(input.query||'').trim()?'Find a thoughtful gift from these preferences':input.query});
+  $('form-errors').hidden=validation.valid;$('form-errors').textContent=validation.errors.join(' ');state.products=[];state.messages=[];state.result=null;state.agentResult=null;$('engine-badge').textContent='Shop MCP + rules · No AI model connected';$('results-content').replaceChildren();
   if(!validation.valid){state.profile=null;$('results-title').textContent='Update the details to search.';announce('Please correct the form. Previous results have been cleared.');return;}
   state.profile=validation.profile;state.excludedIds=[];state.excludedCategories=[];
-  $('results-title').textContent='Finding real possibilities…';$('results-content').append(el('p','loading-state','Searching Shop’s merchant catalog. No account or AI model is used.'));
+  $('results-title').textContent='Finding real possibilities…';$('results-content').append(el('p','loading-state',useAgent?'The model is choosing searches and refreshing live Shop products. No checkout or payment tool is available to it.':'Searching Shop’s merchant catalog. No account or AI model is used.'));
   const submit=form.querySelector('button[type=submit]');submit.disabled=true;announce('Searching Shop.');
-  try{const data=await api({action:'search',query:state.profile.query,budget:state.profile.budget});if(seq!==state.searchSeq)return;state.products=data.products??[];state.messages=data.messages??[];render();if(window.innerWidth<651)$('results-region').scrollIntoView({block:'start',behavior:'smooth'});}
-  catch(error){if(seq!==state.searchSeq)return;state.products=[];state.messages=[];$('results-title').textContent='The live catalog is unavailable.';$('results-content').replaceChildren(el('p','result-notice',error.message),el('p','field-note','No sample products have been substituted for live results. You can try the search again when the service is available.'));announce(error.message);}
+  try{const data=useAgent?await api({consent:true,likes:state.profile.likes,dislikes:state.profile.dislikes,occasion:state.profile.occasion,budget:state.profile.budget,query:String(input.query||''),excludedFactors:state.excludedFactors},'/api/agent'):await api({action:'search',query:state.profile.query,budget:state.profile.budget});if(seq!==state.searchSeq)return;if(useAgent){if(data.modelConnected!==true||!Array.isArray(data.recommendations))throw new Error('The server did not confirm a successful model-guided run.');state.agentResult=data;}state.products=data.products??[];state.messages=data.messages??[];render();if(window.innerWidth<651)$('results-region').scrollIntoView({block:'start',behavior:'smooth'});}
+  catch(error){if(seq!==state.searchSeq)return;state.products=[];state.messages=[];$('results-title').textContent=useAgent?'The AI-guided run is unavailable.':'The live catalog is unavailable.';$('results-content').replaceChildren(el('p','result-notice',error.message),el('p','field-note',useAgent?'No rules result has been labeled as AI. Turn off AI-guided search to use transparent rules instead.':'No sample products have been substituted for live results. You can try the search again when the service is available.'));announce(error.message);}
   finally{if(seq===state.searchSeq)submit.disabled=false;}
 }
-function openBrief(rec){$('brief-text').value=shopBrief(state.profile,rec);$('copy-status').textContent='';$('copy-brief').textContent='Copy brief ↗';$('brief-dialog').showModal();$('copy-brief').focus();}
+function openBrief(rec){$('brief-text').value=shopBrief(state.profile,rec,state).replace('Ranking is rules-based, not an LLM recommendation.',state.agentResult?`AI-guided selection via Vercel AI Gateway (${state.agentResult.model}), with deterministic constraints.`:'Ranking is rules-based, not an LLM recommendation.');$('copy-status').textContent='';$('copy-brief').textContent='Copy brief ↗';$('brief-dialog').showModal();$('copy-brief').focus();}
 async function openProduct(rec,opener){
-  state.active={rec,opener,product:null,variant:null,selected:[...(rec.variant.options??[])],requested:[...(rec.variant.options??[])],profile:{...state.profile},valid:false};
+  state.active={rec,opener,product:null,variant:null,selected:[...(rec.variant.options??[])],requested:[...(rec.variant.options??[])],profile:{...state.profile},modelGuided:Boolean(state.agentResult),valid:false};
   $('product-title').textContent=rec.product.title;$('product-detail').replaceChildren();$('checkout-result').replaceChildren();$('product-dialog').showModal();await refreshProduct(state.active.selected);
 }
 async function refreshProduct(selected){
@@ -71,7 +83,7 @@ async function refreshProduct(selected){
   try{const data=await api({action:'product',productId:active.rec.product.id,selected,budget:active.profile.budget});if(seq!==state.productSeq||active!==state.active)return;
     const p=data.product;const v=p?.variants?.[0];if(!p||!v)throw new Error('Shop did not return an exact product variant.');
     active.product=p;active.variant=v;active.selected=selected;
-    active.recipientMatch=rankShopProducts([p],active.profile,state).recommendations.length>0;
+    active.recipientMatch=rankShopProducts([p],active.profile,{...state,requireInterestEvidence:!active.modelGuided}).recommendations.length>0;
     active.valid=active.recipientMatch&&selectedMatches(selected,p,v)&&v.availability?.available===true&&v.price?.currency==='USD'&&Number.isSafeInteger(v.price?.amount)&&v.price.amount<=Math.round(active.profile.budget*100)&&v.price.amount>=0;
     renderProduct(data.messages??[]);$('product-status').textContent=active.valid?'Refreshed now. Review the exact option and item price below.':'This selection cannot be checked out here. It may have changed, be unavailable, exceed the budget, or differ from the requested options.';
   }catch(error){if(seq!==state.productSeq||active!==state.active)return;active.valid=false;$('product-status').textContent=error.message;$('product-detail').replaceChildren(el('p','result-notice','No checkout was created. Refresh failed; close and choose again only when you want a fresh read.'));}
@@ -80,6 +92,7 @@ function renderProduct(messages){
   const active=state.active;const p=active.product;const v=active.variant;const host=$('product-detail');host.replaceChildren();
   const image=productImage(p,v);if(image){const img=el('img','detail-image');img.src=image.url;img.alt=image.alt;img.referrerPolicy='no-referrer';host.append(img);}
   host.append(el('p','merchant-domain',`${v.seller?.name||'Merchant'} · ${v.seller?.domain||'Unknown seller'}`),el('p','detail-price',formatMoney(v.price)),el('p','field-note',`Availability: ${v.availability?.available===true?'reported available at refresh':'not confirmed available'}. Item price only; shipping and tax are extra.`));
+  factorWarning(host,assessExclusions(p,v,state.excludedFactors).unknown);
   const options=el('div','variant-options');for(const option of Array.isArray(p.options)?p.options:[]){
     if(!option.name||!Array.isArray(option.values))continue;const field=el('div','field');const label=el('label','',option.name);const select=el('select');select.setAttribute('aria-label',option.name);
     const requested=active.selected.find(x=>x.name===option.name)?.label;for(const value of option.values){if(typeof value.label!=='string')continue;const o=el('option','',value.label+(value.available===false?' (unavailable)':''));o.value=value.label;if(value.label===requested)o.selected=true;o.disabled=value.exists===false;select.append(o);}
@@ -119,3 +132,6 @@ $('close-product').addEventListener('click',()=>$('product-dialog').close());
 $('product-dialog').addEventListener('close',()=>{++state.productSeq;state.active?.opener?.focus();});
 for(const id of ['brief-dialog','product-dialog'])$(id).addEventListener('click',event=>{if(event.target===$(id)){const r=$(id).getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)$(id).close();}});
 $('copy-brief').addEventListener('click',async()=>{try{if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');await navigator.clipboard.writeText($('brief-text').value);$('copy-status').textContent='Copied. Your brief stays under your control.';$('copy-brief').textContent='Copied ✓';}catch{$('brief-text').focus();$('brief-text').select();$('copy-status').textContent='Clipboard access is unavailable. The brief is selected; use your device’s Copy command.';}});
+
+$('reset-factors').addEventListener('click',()=>{state.excludedFactors=[];renderFactorChips();render();});
+renderFactorChips();

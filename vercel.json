@@ -29,6 +29,9 @@
   "functions": {
     "api/shop.mjs": {
       "maxDuration": 60
+    },
+    "api/agent.mjs": {
+      "maxDuration": 60
     }
   }
 }

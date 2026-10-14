@@ -96,3 +96,9 @@ test('review: invalid resubmission cannot leave actionable stale recommendations
   assert.equal(get('form-errors').hidden, false);
   assert.equal(descendants(get('results-content')).filter(node => node.className === 'gift-card').length, 0);
 });
+
+
+test('review: hero image sizing overrides intrinsic HTML heights', async () => {
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.hero-product img\{[^}]*height:auto/);
+});

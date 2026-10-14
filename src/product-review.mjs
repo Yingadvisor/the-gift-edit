@@ -5,4 +5,4 @@ function canonical(value){
   if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().filter(k=>!['__proto__','constructor','prototype'].includes(k)).map(k=>[k,canonical(value[k])]));
   return value??null;
 }
-export function reviewContent(product,variant){return JSON.stringify(canonical({id:product?.id,title:product?.title,category:product?.category,description:product?.description,metadata:product?.metadata,variant:{id:variant?.id,title:variant?.title,description:variant?.description,options:variant?.options??[]}}));}
+export function reviewContent(product,variant){return JSON.stringify(canonical({id:product?.id,title:product?.title,category:product?.category,description:product?.description,metadata:product?.metadata,options:product?.options??[],variant:{id:variant?.id,title:variant?.title,description:variant?.description,metadata:variant?.metadata,options:variant?.options??[]}}));}

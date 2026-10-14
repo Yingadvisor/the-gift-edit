@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A recipient-first gift recommendation prototype. Thoughtful suggestions from original artwork, with honest budgets and clear evidence.">
+  <meta name="description" content="Recipient-first gift discovery from live Shop merchant listings, with transparent rules-based matching and buyer-controlled checkout.">
   <meta name="theme-color" content="#122b43"><title>The Gift Edit · Thoughtful by design</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.mjs"></script>
@@ -23,7 +23,7 @@
       <p class="hero-fineprint">Recipient-first. Real merchant listings. You decide when to buy.</p>
       <div class="hero-proof"><span><strong>US</strong> demo market</span><span><strong>USD</strong> transparent item budgets</span></div>
     </div>
-    <div class="hero-art" aria-label="Three original artwork product previews">
+    <div class="hero-art" aria-label="Two original artwork product previews">
       <span class="orbit orbit-one" aria-hidden="true"></span><span class="orbit orbit-two" aria-hidden="true"></span>
       <div class="floating-note"><span aria-hidden="true">✧</span> A little more personal.</div>
       <figure class="hero-product hero-pillow"><img src="/assets/celestial-voyager-pillow-arcade-preview.png" alt="Celestial Voyager navy and gold-toned galaxy pillow" width="1024" height="1024"><figcaption>For their universe.</figcaption></figure>
@@ -37,22 +37,24 @@
     <div><span class="step-number">03</span><p><strong>Make it thoughtful</strong><span>Choose a variant, then pay with the merchant.</span></p></div>
   </section>
   <section class="workspace" id="workspace" aria-labelledby="workspace-title">
-    <div class="section-heading"><div><div class="eyebrow">THE THOUGHTFUL PART STARTS HERE</div><h2 id="workspace-title">Who are we celebrating?</h2></div><span class="engine-badge"><span aria-hidden="true"></span> Shop MCP + rules · No AI model connected</span></div>
+    <div class="section-heading"><div><div class="eyebrow">THE THOUGHTFUL PART STARTS HERE</div><h2 id="workspace-title">Who are we celebrating?</h2></div><span class="engine-badge" id="engine-badge"><span aria-hidden="true"></span> Shop MCP + rules · No AI model connected</span></div>
     <div class="workspace-grid">
       <aside class="profile-panel">
         <div class="panel-heading"><span class="small-star" aria-hidden="true">✧</span><div><h3>A few things about them</h3><p>Small details make the difference.</p></div></div>
         <form id="gift-form" novalidate>
+          <div class="agent-mode"><label class="agent-choice"><input id="use-agent" type="checkbox"><span>Use AI-guided search</span></label><p class="field-note" id="agent-mode-note">When selected, share the interests, avoidances, occasion, item budget and search direction below with Vercel AI Gateway and its model. The recipient name field stays here. Keep identifying or sensitive information out of the shared fields. Requires configured Gateway access; no model is called until you search.</p></div>
           <div class="field"><label for="recipient">Who is the gift for?</label><input id="recipient" name="recipient" placeholder="e.g. Alex, my best friend" maxlength="80" required autocomplete="off"></div>
           <div class="form-row"><div class="field"><label for="relationship">Your relationship</label><select id="relationship" name="relationship"><option value="Friend">Friend</option><option>Partner</option><option>Family</option><option>Colleague</option><option>Host</option><option>Other</option></select></div><div class="field"><label for="occasion">The occasion</label><select id="occasion" name="occasion"><option>Birthday</option><option>Thank you</option><option>Housewarming</option><option>Anniversary</option><option>Celebration</option><option>Just because</option></select></div></div>
           <div class="field"><div class="label-row"><label for="budget">Budget ceiling</label><span>USD · item price</span></div><input id="budget" name="budget" type="number" min="1" max="10000" step="0.01" placeholder="e.g. 120" required inputmode="decimal" aria-describedby="budget-note"><p class="field-note" id="budget-note">US / USD demo context, not your location. Shipping and tax are extra and may take the final total over this budget.</p></div>
           <div class="field"><label for="likes">What do they love?</label><textarea id="likes" name="likes" rows="4" maxlength="1200" placeholder="They love ocean walks, collecting shells, and hosting friends for dinner." required aria-describedby="likes-note"></textarea><p class="field-note" id="likes-note">Tell us about the recipient, not your own taste. We match only the interests you actually mention.</p></div>
-          <div class="field"><label for="query">What should we search for?</label><input id="query" name="query" maxlength="240" required placeholder="e.g. ocean-inspired gifts for hosting" aria-describedby="query-note"><p class="field-note" id="query-note">Only this query, your item budget and the US / USD demo context are sent to Shop. Keep names and private details out of the query.</p></div>
-          <div class="field"><label for="dislikes">Anything to avoid? <span class="optional">Optional</span></label><textarea id="dislikes" name="dislikes" rows="2" maxlength="1200" placeholder="e.g. silk, pillows, floral patterns"></textarea></div>
+          <div class="field"><label for="query">What should we search for?</label><input id="query" name="query" maxlength="240" required placeholder="e.g. ocean-inspired gifts for hosting" aria-describedby="query-note"><p class="field-note" id="query-note">Rules mode sends this query and budget to Shop. AI mode can choose its own searches, so this direction is optional. Keep names and private details out of this field.</p></div>
+          <fieldset class="quick-exclusions" aria-describedby="exclusion-note"><legend>Quick exclusions <span class="optional">Choose any</span></legend><div id="exclusion-chips" class="exclusion-chips"></div><p class="field-note" id="exclusion-note">We hide items only when returned details show a selected factor. Missing evidence is marked “Can’t verify”, not guaranteed safe. These choices stay local in rules mode and go to the model in AI mode.</p><button type="button" class="text-button" id="reset-factors">Clear quick exclusions</button></fieldset>
+          <div class="field"><label for="dislikes">Other things to avoid <span class="optional">Optional</span></label><textarea id="dislikes" name="dislikes" rows="2" maxlength="1200" placeholder="e.g. silk, pillows, floral patterns"></textarea></div>
           <div id="form-errors" class="form-errors" role="alert" hidden></div>
           <button class="button primary full-width" type="submit">Search live gifts <span aria-hidden="true">→</span></button>
           <button class="example-button" id="try-example" type="button">Or try an ocean-loving host <span aria-hidden="true">↗</span></button>
         </form>
-        <p class="privacy-note"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 9V6a5 5 0 0 1 10 0v3M4 9h12v9H4z"/></svg>Recipient details stay in this tab. Search sends only the query and budget to Shop. Merchant images load from their original URLs. No account or model calls.</p>
+        <p class="privacy-note"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 9V6a5 5 0 0 1 10 0v3M4 9h12v9H4z"/></svg>Rules mode keeps gift preferences in this tab. AI mode shares the fields described above, never the recipient name field. Merchant images load from original URLs. No account or payment details are requested.</p>
       </aside>
       <div class="results-panel" id="results-region" aria-labelledby="results-title">
         <div class="results-heading"><div><div class="eyebrow">A SMALL, CONSIDERED SELECTION</div><h3 id="results-title">Their next favorite thing.</h3></div><span class="catalog-count">US / USD</span></div>
@@ -66,7 +68,7 @@
   </section>
   <section class="closing-note"><span aria-hidden="true">✧</span><p>It isn’t about finding more things.<br><em>It’s about finding a little more meaning.</em></p></section>
 </main>
-<footer><span class="footer-brand">the gift edit</span><p>Shop MCP commerce demo with rules-based ranking. Expression Atelier stays separate.</p><a href="https://expressionatelier.vercel.app/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Visit Expression Atelier ↗</a></footer>
+<footer><span class="footer-brand">the gift edit</span><p>Shop MCP gift discovery. Choose transparent rules or optional AI-guided search. Expression Atelier stays separate.</p><a href="https://expressionatelier.vercel.app/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Visit Expression Atelier ↗</a></footer>
 <dialog id="brief-dialog" aria-labelledby="brief-title"><div class="dialog-header"><div><div class="eyebrow">TAKE THE THOUGHT WITH YOU</div><h2 id="brief-title">Your gift brief</h2></div><button type="button" class="close-button" id="close-brief" aria-label="Close gift brief">×</button></div><p class="dialog-intro">Copy the recipient-first brief for your own reference. Expression Atelier is a separate original-art exploration, not the merchant checkout.</p><label for="brief-text" class="sr-only">Copyable gift design brief</label><textarea id="brief-text" readonly rows="14"></textarea><div class="dialog-actions"><button id="copy-brief" class="button primary" type="button">Copy brief <span aria-hidden="true">↗</span></button><a class="button secondary" href="https://expressionatelier.vercel.app/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open Atelier ↗</a></div><p class="copy-status" id="copy-status" role="status"></p><p class="dialog-fineprint">Atelier is a general link only: no automatic brief ingestion or product recreation. Shop checkout is separate, and payment happens on the merchant page.</p></dialog>
 <dialog id="product-dialog" aria-labelledby="product-title">
   <div class="dialog-header"><div><div class="eyebrow">CHOOSE THE EXACT GIFT</div><h2 id="product-title">Product details</h2></div><button class="close-button" id="close-product" type="button" aria-label="Close product details">×</button></div>

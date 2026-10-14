@@ -333,3 +333,6 @@ export function createShopHandler({fetchImpl = globalThis.fetch, now = () => Dat
 }
 
 export default createShopHandler();
+
+// Shared server-only request boundary for the optional agent route.
+export {assertRequestHeaders,readBody};

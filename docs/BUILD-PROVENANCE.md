@@ -18,3 +18,10 @@
 - No real checkout, charge or order was created in verification. Checkout is covered with synthetic mocked responses only.
 - Original artwork concepts remain pre-existing inspiration, clearly separate from real Shop merchant listings. No Shop catalog response or merchant image was saved/rehosted in the repository.
 - User supplied the new public repository https://github.com/Yingadvisor/the-gift-edit for source import. Import verification is recorded separately; no deployment is implied.
+
+## Optional model tool loop and exclusions
+
+- Implemented locally starting approximately 2026-10-14T19:15:00Z after the user requested easy exclusion factors and identified Vercel as the onsite model/credit provider.
+- The model loop is application code, not evidence of working credits or live inference. All model tests use synthetic responses until a bounded live run is separately verified.
+- No model credentials were created, entered, saved or exposed by implementation work. Existing server credential/OIDC consumption is optional.
+- Two branch-update attempts for the earlier layout-only commit were canceled; readback showed main unchanged. The consolidated agent/chips/layout release is prepared separately, not a bypass of either canceled write.

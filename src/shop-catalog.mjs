@@ -1,3 +1,5 @@
+import {EXCLUSION_FACTORS, assessExclusions} from './exclusion-factors.mjs';
+export {EXCLUSION_FACTORS, assessExclusions};
 import {validateProfile, extractEvidence} from './recommender.mjs';
 export const SHOP_CONTEXT=Object.freeze({country:'US',currency:'USD',label:'US / USD demo market'});
 export const SHOP_ENGINE=Object.freeze({id:'shop-mcp-rules-v1',modelConnected:false,label:'Shop catalog + transparent rules',disclosure:'Shop MCP supplies live product data. Ranking is rules-based; no AI model is connected.'});
@@ -29,7 +31,7 @@ export function selectedMatches(requested,product,variant){
   const same=(a,b)=>a.length===b.length&&a.every(x=>b.some(y=>y.name===x.name&&y.label===x.label));
   return same(requested,Array.isArray(product?.selected)?product.selected:[])&&same(requested,Array.isArray(variant?.options)?variant.options:[]);
 }
-export function rankShopProducts(products,profile,{excludedIds=[],excludedCategories=[]}={}){
+export function rankShopProducts(products,profile,{excludedIds=[],excludedCategories=[],excludedFactors=[],requireInterestEvidence=true}={}){
   const evidence=extractEvidence(profile);
   const positiveTokens=tokens(evidence.positiveText);
   const positive=expanded(positiveTokens);
@@ -44,6 +46,8 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
     if(variant.price?.currency!=='USD'||!Number.isSafeInteger(variant.price?.amount)||variant.price.amount<0){reject('Price missing or not USD');continue;}
     if(variant.price.amount>Math.round(profile.budget*100)){reject('Item price exceeds budget');continue;}
     if(variant.availability?.available!==true){reject('Featured variant is not confirmed available');continue;}
+    const factors=assessExclusions(product,variant,excludedFactors);
+    if(factors.matches.length){reject(`Excluded factor: ${factors.matches.map(x=>x.label).join(', ')}`);continue;}
     const description=value=>typeof value==='string'?value:(typeof value?.plain==='string'?value.plain:'');
     const metadata=[...(product.metadata?.tech_specs??[]),...(product.metadata?.top_features??[])].filter(x=>typeof x==='string');
     const text=[product.title,description(product.description),description(variant.description),...metadata,category?.label,...(variant.options??[]).map(o=>`${o.name} ${o.label}`)].filter(x=>typeof x==='string').join(' ');
@@ -51,15 +55,16 @@ export function rankShopProducts(products,profile,{excludedIds=[],excludedCatego
     const bad=[...negative].filter(w=>words.has(w));if(bad.length){reject(`Conflicts with stated avoidances: ${bad.slice(0,3).join(', ')}`);continue;}
     const hits=positiveTokens.filter(word=>[...expanded([word])].some(w=>words.has(w)));
     // Retain only evidence-linked matches; query relevance alone never invents recipient taste.
-    if(!hits.length){reject('No explicit recipient-interest overlap in the returned details');continue;}
+    if(requireInterestEvidence&&!hits.length){reject('No explicit recipient-interest overlap in the returned details');continue;}
     const titleWords=expanded(tokens(product.title));const score=hits.length+hits.filter(word=>[...expanded([word])].some(w=>titleWords.has(w))).length;
-    ranked.push({product,variant,category,index,score,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
+    ranked.push({product,variant,category,index,score,factorUnknowns:factors.unknown,evidence:[...new Set(hits)].slice(0,3),image:productImage(product,variant),url:safeHttpsUrl(variant.url),reasons:[`The returned product details connect to your recipient’s stated interest: ${[...new Set(hits)].slice(0,3).join(', ')}.`,`The current featured item price is ${formatMoney(variant.price)}, before tax and shipping.`]});
   }
   ranked.sort((a,b)=>b.score-a.score||a.variant.price.amount-b.variant.price.amount||a.index-b.index);
   return {recommendations:ranked.slice(0,6),rejected,notices:evidence.notices,engine:SHOP_ENGINE};
 }
-export function shopBrief(profile,rec){return [
+export function shopBrief(profile,rec,{excludedFactors=[]}={}){return [
   'GIFT BRIEF · THE GIFT EDIT',`Recipient: ${profile.recipient}`,`Relationship: ${profile.relationship||'Not specified'}`,`Occasion: ${profile.occasion||'Just because'}`,`Recipient likes: ${profile.likes}`,`Avoid: ${profile.dislikes||'None stated'}`,`Item-price budget: ${profile.budget} USD (tax and shipping extra)`,
+  `Quick exclusions: ${EXCLUSION_FACTORS.filter(x=>excludedFactors.includes(x.id)).map(x=>x.label).join(', ')||'None selected'}`,`Cannot verify from returned details: ${(rec.factorUnknowns??[]).map(x=>x.label).join(', ')||'No selected factor flagged as unknown; not a merchant guarantee'}`,
   `Shop product: ${rec.product.title}`,`Merchant: ${rec.variant.seller.name||rec.variant.seller.domain}`,`Current featured price: ${formatMoney(rec.variant.price)}`,`Product link: ${rec.url||'Unavailable'}`,
   'Catalog prices and stock can change. Refresh the exact variant before checkout. The buyer reviews final terms, shipping and taxes and pays on the merchant page.',
   'Ranking is rules-based, not an LLM recommendation.',
