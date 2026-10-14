@@ -280,17 +280,41 @@ export async function runGiftAgent(input, {callModel, callShop, getToken, fetchI
         continue;
       }
       stage='recommendation_validation';
-      if (!searched || typeof reply.content !== 'string' || reply.content.length > 12000) fail('AGENT_INVALID_RESPONSE');
-      let final; try { const content=reply.content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i,'$1');final = JSON.parse(content); } catch { fail('AGENT_INVALID_RESPONSE'); }
-      keys(final, ['recommendations', 'summary'], 'AGENT_INVALID_RESPONSE');
-      string(final.summary, 1000, false, 'AGENT_INVALID_RESPONSE');
-      if (!Array.isArray(final.recommendations) || final.recommendations.length > 10) fail('AGENT_INVALID_RESPONSE');
+      const invalidFinal=issue=>{const error=new GiftAgentError('AGENT_INVALID_RESPONSE');error.finalIssue=issue;throw error;};
+      if (!searched) invalidFinal('no_catalog');
+      if (typeof reply.content !== 'string') invalidFinal('invalid_envelope');
+      if (reply.content.length > 12000) invalidFinal('oversized_envelope');
+      let final; try { const content=reply.content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i,'$1');final = JSON.parse(content); } catch { invalidFinal('malformed_json'); }
+      // Preflight every inspectable identity before recoverable formatting checks.
+      // Malformed prose or extra fields must never mask fabricated provenance.
+      if (isRecord(final)&&Array.isArray(final.recommendations)) {
+        const ids=new Set();
+        for (const rec of final.recommendations) {
+          if (!isRecord(rec)) invalidFinal('invalid_identity');
+          if (typeof rec.productId!=='string'||!GID.test(rec.productId)||!seen.has(rec.productId)) invalidFinal('unobserved_product');
+          if (ids.has(rec.productId)) invalidFinal('duplicate_product');
+          ids.add(rec.productId);
+          if (!refreshed.has(rec.productId)) invalidFinal('unrefreshed_product');
+          const variants=refreshed.get(rec.productId).product.variants;
+          if (typeof rec.variantId!=='string'||!GID.test(rec.variantId)||variants.filter(v=>v?.id===rec.variantId).length!==1) invalidFinal('unobserved_variant');
+        }
+      }
+      try {
+        keys(final, ['recommendations','summary'], 'AGENT_INVALID_RESPONSE');
+        if (final.summary!==undefined) string(final.summary,1000,false,'AGENT_INVALID_RESPONSE');
+        if (!Array.isArray(final.recommendations)||final.recommendations.length>10) invalidFinal('invalid_schema');
+        for (const rec of final.recommendations) {
+          keys(rec,['productId','variantId','reason'],'AGENT_INVALID_RESPONSE');
+          // These prose fields are discarded in favor of deterministic facts.
+          if (rec.reason!==undefined) string(rec.reason,500,false,'AGENT_INVALID_RESPONSE');
+        }
+      } catch { invalidFinal('invalid_schema'); }
       const selectedIds = new Set(); const products = []; const recommendations = [];
       const acceptedCategoryCounts=new Map();
       const rejectionCounts = {category_limit:0,addon:0,audience:0,theme:0,interest:0,variant_mismatch:0,stock:0,currency:0,budget:0,exclusion:0,dislike:0,incomplete:0};
       const negative = extractEvidence(profile).negativeText;
       for (const rec of final.recommendations) {
-        keys(rec, ['productId', 'variantId', 'reason'], 'AGENT_INVALID_RESPONSE'); string(rec.reason, 500, true, 'AGENT_INVALID_RESPONSE');
+        // The complete final list was grounded and schema-checked above.
         if (selectedIds.has(rec.productId) || !seen.has(rec.productId) || !refreshed.has(rec.productId)) fail('AGENT_INVALID_RESPONSE');
         selectedIds.add(rec.productId);
         const {product, selected} = refreshed.get(rec.productId);
@@ -396,7 +420,8 @@ export async function runGiftAgent(input, {callModel, callShop, getToken, fetchI
     const safe=error instanceof GiftAgentError?error:new GiftAgentError(controller.signal.aborted?'AGENT_TIMEOUT':'AGENT_UPSTREAM');safe.stage=stage;
     const recoverable = ['AGENT_LIMIT','AGENT_TIMEOUT','AGENT_UPSTREAM'].includes(safe.code)
       || (safe.code==='AGENT_INVALID_RESPONSE' && stage==='tool_arguments' && repairBatches>=2 && ['invalid_encoding','malformed_json','invalid_schema','unknown_fields','unobserved_product','unobserved_option'].includes(safe.argumentIssue));
-    if (seen.size && recoverable) {
+    const formatRecovery=safe.code==='AGENT_INVALID_RESPONSE'&&stage==='recommendation_validation'&&['invalid_envelope','malformed_json','invalid_schema'].includes(safe.finalIssue);
+    if (seen.size && (recoverable||formatRecovery)) {
       // Catalog snapshots only, explicitly NOT completed AI recommendations.
       // Prefer the latest refreshed snapshot and never resurrect stale stock/price.
       const candidates=[];
@@ -410,7 +435,7 @@ export async function runGiftAgent(input, {callModel, callShop, getToken, fetchI
         if(variants.length)candidates.push({...product,variants});
       }
       const ranked=rankShopProducts(candidates,profile,{excludedFactors:profile.excludedFactors,requireInterestEvidence:true});
-      return {recovery:{mode:'rules',code:safe.code,stage,...(safe.limitReason?{limitReason:safe.limitReason}:{}),observedCount:seen.size,refreshedCount:refreshed.size},modelConnected:false,model,
+      return {recovery:{mode:'rules',code:safe.code,stage,...(formatRecovery?{finalIssue:safe.finalIssue}:{}),...(safe.limitReason?{limitReason:safe.limitReason}:{}),observedCount:seen.size,refreshedCount:refreshed.size},modelConnected:false,model,
         recommendations:[],products:ranked.recommendations.map(r=>r.product),addonProducts:(ranked.addons??[]).map(r=>r.product),
         catalogCounts:{observed:seen.size,refreshed:refreshed.size,selected:0},summary:'AI selection did not finish. These are rules-screened catalog options, not AI recommendations. Refresh and review exact variants before adding or buying.',messages:warnings,toolTrace:trace};
     }

@@ -49,7 +49,8 @@ export function createAgentHandler({runAgent=runGiftAgent,env=process.env,now=()
         const argumentIssues=new Set(['invalid_envelope','duplicate_call_id','invalid_encoding','malformed_json','invalid_schema','unknown_fields','unobserved_product','unobserved_option']);
         const limitReason=error.code==='AGENT_LIMIT'&&['final_step_tools','oversized_batch','turn_limit'].includes(error.limitReason)?error.limitReason:null;
         const argumentIssue=stage==='tool_arguments'&&argumentIssues.has(error.argumentIssue)?error.argumentIssue:null;
-        return send(Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:502,{error:{code:error.code,stage,...(limitReason?{limitReason}:{}),...(argumentIssue?{argumentIssue}:{}),message:`${new GiftAgentError(error.code).message} (${error.code}; stage: ${stage}${argumentIssue?`; reason: ${argumentIssue}`:''}) No checkout or payment was made.`}});
+        const finalIssue=stage==='recommendation_validation'&&['no_catalog','oversized_envelope','invalid_envelope','malformed_json','invalid_schema','invalid_identity','unobserved_product','duplicate_product','unrefreshed_product','unobserved_variant'].includes(error.finalIssue)?error.finalIssue:null;
+        return send(Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:502,{error:{code:error.code,stage,...(limitReason?{limitReason}:{}),...(argumentIssue?{argumentIssue}:{}),...(finalIssue?{finalIssue}:{}),message:`${new GiftAgentError(error.code).message} (${error.code}; stage: ${stage}${argumentIssue?`; reason: ${argumentIssue}`:finalIssue?`; reason: ${finalIssue}`:''}) No checkout or payment was made.`}});
       }
       const known=['INVALID_AGENT_INPUT','MODEL_NOT_CONFIGURED','AGENT_RATE_LIMIT','INVALID_REQUEST','INVALID_JSON','REQUEST_TOO_LARGE','ORIGIN_NOT_ALLOWED','METHOD_NOT_ALLOWED','UNSUPPORTED_MEDIA_TYPE'];
       const code=known.includes(error?.code)?error.code:'AGENT_UNAVAILABLE';

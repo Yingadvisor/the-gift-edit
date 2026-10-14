@@ -802,3 +802,8 @@ test('Multi-interest UI: observed fallback alternatives display immediately with
 });
 
 test('unspecified relationship and occasion remain empty through explicit submit; selected values remain deliberate',async()=>{const h=await harness(()=>response({products:[],messages:[]}));h.get('gift-form').values={...profile,relationship:'',occasion:''};await h.run('search()');assert.equal(h.run('state.profile.relationship'),'');assert.equal(h.run('state.profile.occasion'),'');assert.equal(h.run('state.profile.selfGift'),false);h.get('gift-form').values={...profile,relationship:'Partner',occasion:'Thank you'};await h.run('search()');assert.equal(h.run('state.profile.relationship'),'Partner');assert.equal(h.run('state.profile.occasion'),'Thank you');});
+test('format-only final recovery is visibly rules-screened, while identity issues cannot masquerade as recovery',async()=>{
+ for(const finalIssue of ['malformed_json','invalid_schema','invalid_envelope','unobserved_product','duplicate_product','unrefreshed_product','unobserved_variant']){
+ const allowed=['malformed_json','invalid_schema','invalid_envelope'].includes(finalIssue);const base=recoveredCatalog();const h=await harness(()=>response({...base,recovery:{...base.recovery,code:'AGENT_INVALID_RESPONSE',stage:'recommendation_validation',finalIssue}}));h.get('use-agent').checked=true;await h.run('search()');assert.equal(h.calls.length,1);assert.equal(h.run('state.agentResult'),null);assert.equal(Boolean(h.run('state.recoveryInfo')),allowed);if(allowed){assert.match(uiText(h.get('results-content')),/rules-screened, not AI-selected/);assert.equal(h.run('state.result.recommendations.length'),1);}else assert.ok(!h.run('state.result?.recommendations?.length'));
+ }
+});

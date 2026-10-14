@@ -420,3 +420,26 @@ test('women-target selected variants cannot reappear through AI final, rules rec
  const final=await runGiftAgent(input,harness(undefined,p).options);assert.equal(final.recommendations.length,0);assert.equal(final.selectionDiagnostics.rejectionCounts.audience,1);assert.equal(final.catalogAlternatives.length,0);
  const recovery=await runGiftAgent(input,{...harness([search(),search()],p).options,maxSteps:2});assert.equal(recovery.modelConnected,false);assert.deepEqual(recovery.products,[]);
 });
+
+test('malformed final format recovers observed catalog only, with no extra model or Shop calls',async()=>{
+ for(const content of ['{bad json','```json\n{"recommendations":',JSON.stringify({recommendations:[],unexpected:'DO_NOT_EXPOSE'})]){
+  const h=harness([search(),{role:'assistant',content}]);const out=await runGiftAgent(profile,h.options);assert.equal(out.modelConnected,false);assert.deepEqual(out.recommendations,[]);assert.equal(out.products.length,1);assert.equal(out.recovery.stage,'recommendation_validation');assert.ok(['malformed_json','invalid_schema'].includes(out.recovery.finalIssue));assert.equal(h.modelCalls.length,2);assert.equal(h.shopCalls.length,1);assert.doesNotMatch(JSON.stringify(out),/DO_NOT_EXPOSE|bad json/);
+ }
+});
+test('discarded final prose may be absent without losing grounded AI selections',async()=>{
+ const h=harness([search(),refresh(),{role:'assistant',content:JSON.stringify({recommendations:[{productId:id,variantId:vid}]})}]);const out=await runGiftAgent(profile,h.options);assert.equal(out.modelConnected,true);assert.equal(out.recommendations.length,1);assert.match(out.recommendations[0].reason,/Ocean ceramic mug/);
+});
+test('final provenance errors remain fatal even when mixed with malformed prose or schema',async()=>{
+ for(const [recommendations,replies,issue] of [
+  [[{productId:'gid://shopify/Product/fake',variantId:vid}], [search(),refresh()], 'unobserved_product'],
+  [[{productId:id,variantId:vid}], [search()], 'unrefreshed_product'],
+  [[{productId:id,variantId:'gid://shopify/ProductVariant/fake'}], [search(),refresh()], 'unobserved_variant'],
+  [[{productId:id,variantId:vid},{productId:id,variantId:vid}], [search(),refresh()], 'duplicate_product'],
+ ]){const h=harness([...replies,{role:'assistant',content:JSON.stringify({recommendations,summary:{private:'NEVER_LEAK'},extra:true})}]);await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.code==='AGENT_INVALID_RESPONSE'&&e.finalIssue===issue);}
+});
+test('format recovery never revives stale inventory, and no catalog cannot recover',async()=>{
+ const p=product();p.variants[0].availability.available=false;const h=harness([search(),refresh(),{role:'assistant',content:'invalid final'}]);h.options.callShop=async name=>name==='search_catalog'?{products:[product()]}:{product:p};const out=await runGiftAgent(profile,h.options);assert.equal(out.modelConnected,false);assert.equal(out.products.length,0);assert.equal(out.recovery.refreshedCount,1);
+ await assert.rejects(()=>runGiftAgent(profile,harness([{role:'assistant',content:'invalid final'}]).options),e=>e.finalIssue==='no_catalog');
+});
+
+test('oversized final cannot conceal fabricated provenance behind format recovery',async()=>{const h=harness([search(),{role:'assistant',content:JSON.stringify({summary:'x'.repeat(12000),recommendations:[{productId:'gid://shopify/Product/fake',variantId:vid}]})}]);await assert.rejects(()=>runGiftAgent(profile,h.options),e=>e.finalIssue==='oversized_envelope');});

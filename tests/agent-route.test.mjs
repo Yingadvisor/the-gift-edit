@@ -24,3 +24,6 @@ test('limit diagnostics expose only allowlisted reason and recovery stays explic
  const handler=createAgentHandler({env:{AI_GATEWAY_API_KEY:'SYNTHETIC_TEST_TOKEN'},runAgent:async()=>({modelConnected:false,recommendations:[],products:[],recovery:{mode:'rules',code:'AGENT_LIMIT',stage:'tool_arguments',limitReason:'oversized_batch',observedCount:1,refreshedCount:0}})});
  const out=await invoke(handler,input);assert.equal(out.status,200);assert.equal(out.body.modelConnected,false);assert.equal(out.body.recovery.mode,'rules');
 });
+test('final diagnostics expose only static allowlisted subreasons',async()=>{
+ const {GiftAgentError}=await import('../server/gift-agent.mjs');for(const issue of ['unobserved_product','duplicate_product','malformed_json','PRIVATE_PROVIDER_TOKEN']){const handler=createAgentHandler({env:{AI_GATEWAY_API_KEY:'SYNTHETIC'},runAgent:async()=>{const e=new GiftAgentError('AGENT_INVALID_RESPONSE');e.stage='recommendation_validation';e.finalIssue=issue;throw e;}});const out=await invoke(handler,input);assert.equal(out.body.error.finalIssue,issue==='PRIVATE_PROVIDER_TOKEN'?undefined:issue);assert.doesNotMatch(JSON.stringify(out),/PRIVATE_PROVIDER_TOKEN/);}
+});
